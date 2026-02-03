@@ -1,0 +1,714 @@
+import { z } from "zod";
+import { dump as yamlDump } from "js-yaml";
+import { mkdir, writeFile, stat } from "node:fs/promises";
+import { basename } from "node:path";
+import type { Logger } from "../logger/logger.ts";
+import type { CostTracker } from "../cost-tracker/cost-tracker.ts";
+import type { RunContext } from "../run-context/run-context.ts";
+import { getSubDebugDir } from "../run-context/run-context.ts";
+import {
+  generateText,
+  Output,
+  NoObjectGeneratedError,
+  stepCountIs,
+  zodSchema,
+  type ModelMessage,
+  type Tool,
+  TypeValidationError,
+  JSONParseError,
+  APICallError,
+  type LanguageModel,
+  type CallSettings
+} from "ai";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+
+/**
+ * Result of a generation request to an LLM.
+ */
+export interface GenerateResult<T> {
+  readonly result: T | null; // For structured output
+  readonly text?: string;    // For conversational output
+  readonly toolCalls?: Array<{ toolCallId: string; toolName: string; args: any }>;
+  readonly toolResults?: Array<{ toolCallId: string; toolName: string; args: any; result: any }>;
+  /** All messages generated during this request (including tool calls and results) */
+  readonly newMessages: ModelMessage[];
+  /** Detailed steps from the underlying LLM provider */
+  readonly steps: any[];
+  readonly estimatedCost: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  /** Text of error for retry */
+  readonly validationError?: string;
+  /** Raw response text for retry */
+  readonly rawResponse?: string;
+}
+
+/**
+ * Supported LLM generation settings.
+ */
+export type LlmSettings = CallSettings & {
+  timeout?: number;
+  toolChoice?: 'auto' | 'none' | 'required' | {
+    type: 'tool';
+    toolName: string;
+  };
+};
+
+/**
+ * Type for LLM requester function.
+ *
+ * You can use zod's .refine() or .superRefine() for complex validation with self-correction.
+ * Errors from these methods will be sent back to the LLM for correction.
+ */
+export type LlmRequester = <T>(
+  params: Readonly<{
+    messages: ModelMessage[];
+    identifier: string;
+    schema: z.ZodType<T> | undefined;
+    tools: Record<string, Tool> | undefined;
+    maxSteps: number | undefined;
+    stageName: string;
+    settings: LlmSettings | undefined;
+  }>
+) => Promise<GenerateResult<T>>;
+
+/**
+ * Represents a parsed Model URI.
+ * Syntax: protocol://provider/model?params
+ * 
+ * - protocol: chat | response-api
+ * - provider: openai | anthropic | gemini | openrouter | ollama
+ * - model: model identifier (can contain slashes)
+ * - params: URL parameters
+ */
+export class ModelURI {
+  private constructor(private readonly url: URL) {}
+
+  static parse(uri: string): ModelURI {
+    try {
+      let normalizedUri = uri;
+
+      if (!uri.includes("://")) {
+        // If no protocol is provided, default to chat://
+        // e.g. "openai/gpt-4" -> "chat://openai/gpt-4"
+        normalizedUri = `chat://${uri}`;
+      }
+
+      const url = new URL(normalizedUri);
+      
+      // Validate that we have a host (provider) and a pathname (model)
+      if (!url.host) {
+        throw new Error("Provider (host) is required in model URI");
+      }
+      if (!url.pathname || url.pathname === "/") {
+        throw new Error("Model identifier (path) is required in model URI");
+      }
+
+      return new ModelURI(url);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to parse model URI "${uri}": ${message}`);
+    }
+  }
+
+  get protocol(): string {
+    return this.url.protocol.replace(":", "");
+  }
+
+  get provider(): string {
+    return this.url.host;
+  }
+
+  get modelName(): string {
+    // Model identifier is the pathname without the leading slash.
+    // e.g. chat://openai/gpt-4 -> /gpt-4 -> gpt-4
+    // e.g. chat://openrouter/meta-llama/llama-3 -> /meta-llama/llama-3 -> meta-llama/llama-3
+    let name = this.url.pathname;
+    if (name.startsWith("/")) name = name.slice(1);
+    if (name.endsWith("/")) name = name.slice(0, -1);
+    return name;
+  }
+
+  get params(): URLSearchParams {
+    return this.url.searchParams;
+  }
+
+  toString(): string {
+    const maskedUrl = new URL(this.url.toString());
+    if (maskedUrl.searchParams.has("apiKey")) {
+      maskedUrl.searchParams.set("apiKey", "***");
+    }
+    return decodeURIComponent(maskedUrl.toString());
+  }
+}
+
+/**
+ * Parameters for creating an LLM requester.
+ */
+export interface LlmRequesterParams {
+  readonly modelUri: ModelURI;
+  readonly logger: Logger;
+  readonly costTracker: CostTracker;
+  readonly ctx: RunContext;
+}
+
+/**
+ * Parsed model URI components.
+ */
+interface ParsedModelUri {
+  readonly protocol: string;
+  readonly provider: string;
+  readonly modelName: string;
+  readonly apiKey?: string;
+  readonly baseURL?: string;
+  readonly logVercelWarnings?: boolean;
+  readonly params: Readonly<Record<string, string>>;
+  readonly settings: LlmSettings;
+}
+
+/**
+ * YAML request data for logging.
+ */
+interface YamlRequestData {
+  readonly model: string;
+  readonly messages: ReadonlyArray<{ readonly role: string; readonly content: string }>;
+  readonly response_format?: { readonly type: string };
+}
+
+/**
+ * YAML response data for logging.
+ */
+interface YamlResponseData {
+  readonly status: number;
+  readonly raw: string;
+  readonly parsed: unknown;
+  readonly error?: string;
+  readonly steps?: any[];
+}
+
+/**
+ * YAML statistics for logging.
+ */
+interface YamlStatsData {
+  readonly duration: number;
+  readonly cost: number;
+  readonly tokens: {
+    readonly input: number;
+    readonly output: number;
+    readonly total: number;
+  };
+}
+
+/**
+ * Full YAML log structure.
+ */
+interface YamlLogData {
+  readonly id: string;
+  readonly timestamp: string;
+  readonly model: string;
+  readonly stage: string;
+  readonly settings: LlmSettings;
+  readonly request: YamlRequestData;
+  readonly attempts: YamlLogAttempt[];
+}
+
+/**
+ * Single attempt in the YAML log.
+ */
+interface YamlLogAttempt {
+  readonly attempt: number;
+  readonly timestamp: string;
+  readonly response?: YamlResponseData;
+  readonly stats?: YamlStatsData;
+  readonly error?: string;
+}
+
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY = 1000;
+
+/**
+ * Parses a model URI into provider and model components.
+ */
+function parseModelUri({ uri }: Readonly<{ uri: ModelURI }>): ParsedModelUri {
+  const result: ParsedModelUri = {
+    protocol: uri.protocol,
+    provider: uri.provider,
+    modelName: uri.modelName,
+    params: {},
+    settings: {},
+  };
+
+  const mutableParams: Record<string, string> = {};
+  const mutableSettings: Record<string, unknown> = {};
+
+  for (const [key, value] of uri.params.entries()) {
+    if (key === "apiKey") (result as { apiKey?: string }).apiKey = value;
+    else if (key === "baseURL") (result as { baseURL?: string }).baseURL = value;
+    else if (key === "logVercelWarnings") {
+      (result as { logVercelWarnings?: boolean }).logVercelWarnings = value !== "false";
+    }
+    else if (["maxTokens", "temperature", "topP", "topK", "frequencyPenalty", "presencePenalty", "seed", "maxRetries", "timeout"].includes(key)) {
+      const numValue = Number(value);
+      if (!isNaN(numValue)) {
+        mutableSettings[key] = numValue;
+      }
+    }
+    else if (key === "stop") {
+      // Handle comma-separated stop sequences if multiple
+      mutableSettings[key] = value.includes(",") ? value.split(",") : value;
+    }
+    else mutableParams[key] = value;
+  }
+
+  (result as { settings: LlmSettings }).settings = mutableSettings as LlmSettings;
+
+  if (!result.apiKey) {
+    const provider = result.provider;
+    const envKey = `${provider.toUpperCase()}_API_KEY`;
+    const envValue = process.env[envKey];
+    if (envValue) {
+      (result as { apiKey?: string }).apiKey = envValue;
+    }
+  }
+
+  (result as { params: Record<string, string> }).params = mutableParams;
+
+  return result;
+}
+
+/**
+ * Creates a language model instance from parsed URI.
+ */
+function createModelInstance({ parsed }: Readonly<{ parsed: ParsedModelUri }>): LanguageModel {
+  const { provider, modelName, apiKey, baseURL } = parsed;
+
+  // In the future, we can switch logic based on 'protocol' (e.g. use response-specific API)
+  // For now, most providers are supported via their standard Chat interface which supports structured outputs.
+  // If protocol === 'response-api', we might want to ensure strict mode or specific settings.
+
+  switch (provider) {
+    case "openai": {
+      const openai = createOpenAI({ apiKey, baseURL });
+      return openai.chat(modelName);
+    }
+    case "anthropic": {
+      const anthropic = createAnthropic({ apiKey });
+      return anthropic(modelName);
+    }
+    case "gemini": {
+      const gemini = createGoogleGenerativeAI({ apiKey });
+      return gemini(modelName);
+    }
+    case "openrouter": {
+      const openrouter = createOpenRouter({
+        apiKey,
+        headers: {
+          "HTTP-Referer": "https://github.com/korchasa/ai-skel-ts",
+          "X-Title": "AI Skeleton TS",
+        }
+      });
+      return openrouter.chat(modelName, {
+        usage: {
+          include: true,
+        },
+      });
+    }
+    default:
+      throw new Error(`Unknown LLM provider: ${provider}`);
+  }
+}
+
+/**
+ * Recursively sanitizes data for YAML logging, converting non-serializable objects.
+ */
+function sanitizeForYaml(obj: unknown, visited = new WeakSet()): unknown {
+  if (obj === null || typeof obj !== "object") {
+    return obj;
+  }
+
+  if (visited.has(obj)) {
+    return "[Circular Reference]";
+  }
+
+  if (obj instanceof Error) {
+    return {
+      name: obj.name,
+      message: obj.message,
+      stack: obj.stack,
+      ...(obj as any),
+    };
+  }
+
+  visited.add(obj);
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeForYaml(item, visited));
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    sanitized[key] = sanitizeForYaml(value, visited);
+  }
+  return sanitized;
+}
+
+/**
+ * Formats data for YAML logging.
+ */
+function createYamlLog(
+  { logData }: Readonly<{ logData: YamlLogData }>
+): string {
+  return yamlDump(sanitizeForYaml(logData), {
+    indent: 2,
+    lineWidth: -1,
+    noRefs: true,
+  });
+}
+
+/**
+ * Ensures a directory exists.
+ */
+async function ensureDebugDir({ debugDir }: Readonly<{ debugDir: string }>): Promise<void> {
+  try {
+    await stat(debugDir);
+  } catch {
+    await mkdir(debugDir, { recursive: true });
+  }
+}
+
+/**
+ * Calculates retry delay with exponential backoff and jitter.
+ */
+function calculateRetryDelay({ attempt }: Readonly<{ attempt: number }>): number {
+  const delay = INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1);
+  return delay + (delay * Math.random() * 0.2);
+}
+
+/**
+ * Internal helper for generating JSON with logging and error handling.
+ *
+ * Supports self-correction on Zod validation errors, including those from
+ * .refine() and .superRefine().
+ */
+async function tryGenerateJson<T>(
+  { identifier, schema, tools, maxSteps, attempt, messages, ctx, modelInstance, maskedUri, costTracker, logger, settings }: Readonly<{
+    identifier: string;
+    schema: z.ZodType<T> | undefined;
+    tools: Record<string, Tool> | undefined;
+    maxSteps: number | undefined;
+    attempt: number;
+    messages: ModelMessage[];
+    ctx: RunContext;
+    modelInstance: LanguageModel;
+    maskedUri: string;
+    costTracker: CostTracker;
+    logger: Logger;
+    settings: LlmSettings | undefined;
+  }>
+): Promise<GenerateResult<T> & { logAttempt: YamlLogAttempt }> {
+  const timestamp = new Date().toISOString();
+  const startTime = Date.now();
+
+    try {
+      logger.debug(
+        `[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] 🚀 Request: model=${maskedUri}, maxRetries=${MAX_RETRIES}, timeout=${settings?.timeout ?? 30000}ms, attempt=${attempt}`
+      );
+
+      try {
+        const controller = new AbortController();
+        const timeoutMs = settings?.timeout ?? 30000;
+        const timeoutId = setTimeout(() => {
+          try {
+            controller.abort();
+          } catch (error) {
+            logger.warn(`[LLM] Error during controller.abort(): ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }, timeoutMs);
+
+        // Use generateText with Output.object if schema is present
+        let result;
+        try {
+          result = await generateText({
+            model: modelInstance,
+            output: schema ? Output.object({ schema: zodSchema(schema) }) : Output.text(),
+            messages,
+            tools,
+            toolChoice: settings?.toolChoice,
+            stopWhen: maxSteps ? stepCountIs(maxSteps) : undefined,
+            abortSignal: controller.signal,
+            ...settings,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
+
+        const usage = result.usage;
+        const inputTokens = usage.inputTokens ?? 0;
+        const outputTokens = usage.outputTokens ?? 0;
+
+        // Extract cost information, preferring provider-specific metadata if available
+        const providerMetadata = result.providerMetadata as Record<string, Record<string, unknown>> | undefined;
+        const openrouterUsage = providerMetadata?.openrouter?.usage as { cost?: number } | undefined;
+        const cost = openrouterUsage?.cost ?? (providerMetadata?.openrouter?.cost as number) ?? 0;
+
+        costTracker.addCost(cost);
+        costTracker.addTokens(inputTokens, outputTokens);
+
+        const duration = Date.now() - startTime;
+
+        // Log successful response with raw text and parsed object
+        const responseData: YamlResponseData = {
+          status: 200,
+          raw: result.text,
+          parsed: result.output,
+          ...(result.steps && result.steps.length > 0 ? { steps: result.steps } : {}),
+        };
+
+        const statsData: YamlStatsData = {
+          duration,
+          cost,
+          tokens: {
+            input: inputTokens,
+            output: outputTokens,
+            total: usage.totalTokens ?? (inputTokens + outputTokens),
+          },
+        };
+
+        const tokens = usage.totalTokens ?? (inputTokens + outputTokens);
+        logger.info(
+          `[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] ✅ Response: status=200, duration=${duration}ms, cost=$${cost.toFixed(6)}, tokens=${tokens}, finishReason=${result.finishReason}, steps=${result.steps?.length || 1}`
+        );
+
+        // Aggregate all messages from steps
+        const newMessages: ModelMessage[] = [];
+        if (result.steps) {
+          for (const step of result.steps) {
+            if (step.text || (step.toolCalls && step.toolCalls.length > 0)) {
+              newMessages.push({
+                role: "assistant",
+                content: step.toolCalls && step.toolCalls.length > 0 
+                  ? (step.text ? [{ type: 'text', text: step.text }, ...step.toolCalls.map((tc: any) => ({ type: 'tool-call', ...tc }))] : step.toolCalls.map((tc: any) => ({ type: 'tool-call', ...tc })))
+                  : step.text
+              } as ModelMessage);
+            }
+            if (step.toolResults && step.toolResults.length > 0) {
+              for (const tr of step.toolResults) {
+                const toolResult = tr as any;
+                newMessages.push({
+                  role: "tool",
+                  content: [{
+                    type: 'tool-result',
+                    toolCallId: toolResult.toolCallId,
+                    toolName: toolResult.toolName,
+                    result: toolResult.result ?? null,
+                  }]
+                } as unknown as ModelMessage);
+              }
+            }
+          }
+        }
+
+        return {
+          result: (result.output as T) ?? null,
+          text: result.text,
+          toolCalls: result.toolCalls as any,
+          toolResults: result.toolResults as any,
+          newMessages,
+          steps: result.steps ?? [],
+          estimatedCost: cost,
+          inputTokens,
+          outputTokens,
+          rawResponse: result.text,
+          logAttempt: {
+            attempt,
+            timestamp,
+            response: responseData,
+            stats: statsData,
+          }
+        };
+      } catch (error: unknown) {
+        let validationError = "Unknown error";
+        let rawResponse = "";
+        let status = 500;
+
+        // Handle specific AI SDK error types to extract as much information as possible
+        if (NoObjectGeneratedError.isInstance(error)) {
+          // NoObjectGeneratedError occurs when the model responds but the output
+          // doesn't match the schema or isn't valid JSON. It contains the raw text.
+          validationError = `The response does not match the required schema. Issues:\n${error.message}`;
+          rawResponse = error.text ?? "";
+          status = 200; // Model responded, but output was invalid
+        } else if (TypeValidationError.isInstance(error)) {
+          validationError = `The JSON response does not match the required schema. Issues:\n${error.message}`;
+          rawResponse = JSON.stringify(error.value);
+        } else if (JSONParseError.isInstance(error)) {
+          validationError = `Failed to parse JSON: ${error.message}`;
+          rawResponse = error.text;
+        } else if (APICallError.isInstance(error)) {
+          validationError = `API Error: ${error.message}`;
+          status = error.statusCode || 500;
+        } else if (error instanceof Error && ('statusCode' in error)) {
+          validationError = `API Error: ${error.message}`;
+          status = (error as { statusCode: number }).statusCode || 500;
+        } else if (error instanceof Error && error.name === 'AbortError') {
+          validationError = `Request timed out after ${settings?.timeout ?? 30000}ms`;
+          status = 408;
+        } else {
+          validationError = error instanceof Error ? error.message : String(error);
+        }
+
+        // Log error response with whatever raw information we managed to capture
+        const errorResponseData: YamlResponseData = {
+          status,
+          raw: rawResponse,
+          parsed: null,
+          error: validationError,
+        };
+
+        logger.debug(
+          `[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] ❌ Error: status=${status}, error=${validationError}`
+        );
+
+        return {
+          result: null,
+          newMessages: [],
+          steps: [],
+          estimatedCost: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          validationError: (status === 401 || status === 403 || status === 400)
+            ? `Fatal API Error (${status}): ${validationError}`
+            : validationError,
+          rawResponse,
+          logAttempt: {
+            attempt,
+            timestamp,
+            response: errorResponseData,
+            error: validationError,
+          }
+        };
+      }
+  } catch (outerError: unknown) {
+    const message = outerError instanceof Error ? outerError.message : String(outerError);
+    return {
+      result: null,
+      newMessages: [],
+      steps: [],
+      estimatedCost: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      validationError: `Critical Error: ${message}`,
+      logAttempt: {
+        attempt,
+        timestamp: new Date().toISOString(),
+        error: `Critical Error: ${message}`
+      }
+    };
+  }
+}
+
+/**
+ * Creates an LLM requester function.
+ */
+export function createLlmRequester(params: LlmRequesterParams): LlmRequester {
+
+  const { modelUri, logger, costTracker, ctx } = params;
+  const parsed = parseModelUri({ uri: modelUri });
+  const { settings: defaultSettings } = parsed;
+
+  if (parsed.logVercelWarnings === false) {
+    (globalThis as any).AI_SDK_LOG_WARNINGS = false;
+  }
+
+  const modelInstance = createModelInstance({ parsed });
+  const maskedUri = modelUri.toString();
+
+  return async <T>(
+    { messages: inputMessages, prompt, identifier, schema, tools, maxSteps, stageName, settings }: Readonly<{
+      messages?: ModelMessage[];
+      prompt?: string;
+      identifier: string;
+      schema: z.ZodType<T> | undefined;
+      tools: Record<string, Tool> | undefined;
+      maxSteps: number | undefined;
+      stageName: string;
+      settings: LlmSettings | undefined;
+    }>
+  ): Promise<GenerateResult<T>> => {
+    const messages: ModelMessage[] = inputMessages ?? (prompt ? [{ role: "user", content: prompt }] : []);
+
+    const mergedSettings = { ...defaultSettings, ...settings };
+    const stageDir = stageName.trim() || "unknown-stage";
+    const debugDir = getSubDebugDir({ ctx, stageDir });
+    const logTimestamp = new Date().toISOString();
+    const logFile = `${debugDir}/${logTimestamp.replace(/[:.]/g, "-")}-${identifier}-request-response.yaml`;
+    const logFilename = basename(logFile);
+
+    const logData: YamlLogData = {
+      id: identifier,
+      timestamp: logTimestamp,
+      model: maskedUri,
+      stage: stageName,
+      settings: mergedSettings,
+      request: {
+        model: maskedUri,
+        messages: messages.map(m => ({
+          role: m.role,
+          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        })),
+        ...(schema ? { response_format: { type: "json_object" } } : {}),
+      },
+      attempts: [],
+    };
+
+    await ensureDebugDir({ debugDir });
+    await writeFile(logFile, createYamlLog({ logData }), "utf-8");
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const result = await tryGenerateJson<T>({
+        identifier,
+        schema,
+        tools,
+        maxSteps,
+        attempt,
+        messages,
+        ctx,
+        modelInstance,
+        maskedUri,
+        costTracker,
+        logger,
+        settings: mergedSettings
+      });
+
+      // Update log file with attempt data
+      (logData.attempts as YamlLogAttempt[]).push(result.logAttempt);
+      await writeFile(logFile, createYamlLog({ logData }), "utf-8");
+
+      if (!result.validationError) {
+        logger.info(`[LLM] [run:${ctx.runId}] [id:${identifier}] Completed in ${attempt} attempts. File: ${logFilename}`);
+        return result;
+      }
+
+      if (result.validationError && result.validationError.includes("Fatal API Error")) {
+        return result;
+      }
+
+      if (result.rawResponse) {
+        messages.push({ role: "assistant", content: result.rawResponse });
+      } else {
+        messages.push({ role: "assistant", content: "Invalid response received." });
+      }
+      messages.push({ role: "user", content: result.validationError || "Invalid response received." });
+
+      if (attempt === MAX_RETRIES) return result;
+
+      const delay = calculateRetryDelay({ attempt });
+      logger.warn(`🔄 Attempt ${attempt} failed, retrying in ${Math.round(delay)}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+    return { result: null, newMessages: [], steps: [], estimatedCost: 0, inputTokens: 0, outputTokens: 0 };
+  };
+}

@@ -1,0 +1,16 @@
+module.exports = {
+  types: [
+    { type: 'feat', section: 'Features' },
+    { type: 'fix', section: 'Bug Fixes' },
+    { type: 'chore', section: 'Chores' },
+    { type: 'docs', section: 'Documentation' },
+    { type: 'style', section: 'Styles' },
+    { type: 'refactor', section: 'Code Refactoring' },
+    { type: 'perf', section: 'Performance Improvements' },
+    { type: 'test', section: 'Tests' },
+    { type: 'ci', section: 'Continuous Integration' },
+  ],
+  commitUrlFormat: '{{host}}/{{owner}}/{{repository}}/commit/{{hash}}',
+  compareUrlFormat: '{{host}}/{{owner}}/{{repository}}/compare/{{previousTag}}...{{currentTag}}',
+  issueUrlFormat: '{{host}}/{{owner}}/{{repository}}/issues/{{id}}',
+};

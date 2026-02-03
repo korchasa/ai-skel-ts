@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "check": "deno run -A ./scripts/task-check.ts",
+    "test": "deno run -A ./scripts/task-test.ts",
+    "build": "deno run -A ./scripts/task-build.ts",
+    "release": "deno run -A ./scripts/task-release.ts"
+  }
+}

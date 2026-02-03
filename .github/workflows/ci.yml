@@ -1,0 +1,86 @@
+---
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@korchasa'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Run checks
+        run: npm run check
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          ACCEPTANCE_TEST_MODEL: chat://openrouter/qwen/qwen2.5-coder-7b-instruct
+
+      # Шаги ниже выполняются только при пуше в main и если это не релизный коммит от бота
+      - name: Create release and push tags
+        id: create-release
+        if: |
+          github.event_name == 'push' && 
+          github.ref == 'refs/heads/main' && 
+          !contains(github.event.head_commit.message, 'chore(release):')
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LATEST_TAG" ]; then
+            RELEASABLE=true
+          else
+            COMMITS=$(git log --oneline ${LATEST_TAG}..HEAD --grep="^feat\|^fix\|^perf\|^break\|^refactor\|^build" | wc -l)
+            if [ "$COMMITS" -gt 0 ]; then RELEASABLE=true; else RELEASABLE=false; fi
+          fi
+
+          if [ "$RELEASABLE" = "true" ]; then
+            npm run release
+            git push --follow-tags origin main
+            
+            # Получаем новую версию
+            NEW_VERSION=$(node -p "require('./package.json').version")
+            echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+            echo "released=true" >> $GITHUB_OUTPUT
+          else
+            echo "Nothing to release"
+            echo "released=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to GitHub Packages
+        if: steps.create-release.outputs.released == 'true'
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        if: steps.create-release.outputs.released == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.create-release.outputs.version }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

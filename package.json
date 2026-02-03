@@ -1,0 +1,107 @@
+{
+  "name": "@korchasa/ai-skel-ts",
+  "version": "0.7.11",
+  "description": "AI Skeleton Tools for TypeScript - Robust foundation for AI-powered applications",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/korchasa/ai-skel-ts.git"
+  },
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/mod.d.ts",
+      "import": "./dist/mod.js"
+    },
+    "./llm": {
+      "types": "./dist/llm.d.ts",
+      "import": "./dist/llm.js"
+    },
+    "./fetch-content": {
+      "types": "./dist/fetch-content.d.ts",
+      "import": "./dist/fetch-content.js"
+    },
+    "./cost-tracker": {
+      "types": "./dist/cost-tracker.d.ts",
+      "import": "./dist/cost-tracker.js"
+    },
+    "./logger": {
+      "types": "./dist/logger.d.ts",
+      "import": "./dist/logger.js"
+    },
+    "./llm-session-compactor": {
+      "types": "./dist/llm-session-compactor.d.ts",
+      "import": "./dist/llm-session-compactor.js"
+    },
+    "./run-context": {
+      "types": "./dist/run-context.d.ts",
+      "import": "./dist/run-context.js"
+    },
+    "./jina-scraper": {
+      "types": "./dist/jina-scraper.d.ts",
+      "import": "./dist/jina-scraper.js"
+    },
+    "./brave-search": {
+      "types": "./dist/brave-search.d.ts",
+      "import": "./dist/brave-search.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "lint": "eslint --max-warnings=0 src/**/*.ts",
+    "release": "standard-version",
+    "check": "npm run lint && npm test && npm run build"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "~3.0.9",
+    "@ai-sdk/google": "~3.0.6",
+    "@ai-sdk/openai": "~3.0.7",
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "@mozilla/readability": "^0.6.0",
+    "@openrouter/ai-sdk-provider": "^6.0.0-alpha.1",
+    "ai": "~6.0.27",
+    "cheerio": "^1.1.2",
+    "js-yaml": "^4.1.1",
+    "jsdom": "~27.4.0",
+    "json-schema-to-zod": "^2.7.0",
+    "metascraper": "~5.49.15",
+    "metascraper-audio": "~5.49.15",
+    "metascraper-author": "~5.49.15",
+    "metascraper-date": "~5.49.15",
+    "metascraper-description": "~5.49.15",
+    "metascraper-image": "~5.49.15",
+    "metascraper-lang": "~5.49.15",
+    "metascraper-logo": "~5.49.15",
+    "metascraper-publisher": "~5.49.15",
+    "metascraper-title": "~5.49.15",
+    "metascraper-url": "~5.49.15",
+    "metascraper-video": "~5.49.15",
+    "zod": "~4.3.5",
+    "zod-to-json-schema": "~3.25.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/jsdom": "^27.0.0",
+    "@types/mozilla-readability": "^0.2.1",
+    "@types/node": "^22.19.5",
+    "@typescript-eslint/eslint-plugin": "^8.52.0",
+    "@typescript-eslint/parser": "^8.52.0",
+    "dotenv": "^17.2.3",
+    "eslint": "^9.39.2",
+    "standard-version": "^9.5.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
