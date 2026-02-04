@@ -489,11 +489,11 @@ src/
 - **GitHub Actions**: automated checks on push/PR
 - **Node.js 20**: runtime with npm cache
 - **Quality Gates**: ESLint (zero warnings), Vitest, TypeScript compilation
-- **Distribution**: npm publish flow
+- **Distribution**: npm (GitHub Packages) and JSR (jsr.io) publish flow
 
 ### Package Management
 
-- **npm**: Primary registry with GitHub Packages support
+- **npm & JSR**: Primary registries with GitHub Packages and JSR.io support
 - **Dependencies**: Node.js ecosystem with Vercel AI SDK
 - **Engine Requirements**: Node.js ≥20.0.0
-- **Distribution**: ESM modules with dual type/import exports
+- **Distribution**: ESM modules with dual type/import exports and JSR source distribution

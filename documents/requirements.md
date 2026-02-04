@@ -120,7 +120,7 @@
 ### Compatibility (NFR-COMPAT)
 - **NFR-COMPAT-1**: Node.js runtime support (primary target, ≥20.0.0)
 - **NFR-COMPAT-2**: ESM module system with TypeScript declarations
-- **NFR-COMPAT-3**: npm package distribution with GitHub Packages
+- **NFR-COMPAT-3**: npm package distribution with GitHub Packages and JSR (jsr.io)
 - **NFR-COMPAT-4**: ES2022+ JavaScript features
 
 ### Maintainability (NFR-MAINT)

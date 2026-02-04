@@ -1,4 +1,28 @@
 {
+  "name": "@korchasa/ai-skel-ts",
+  "version": "0.0.0",
+  "exports": {
+    ".": "./mod.ts",
+    "./llm": "./src/llm/llm.ts",
+    "./agent": "./src/agent/agent.ts",
+    "./fetch-content": "./src/fetchers/local-fetcher/fetch-content.ts",
+    "./jina-scraper": "./src/fetchers/jina-fetcher/jina-scraper.ts",
+    "./brave-fetcher": "./src/fetchers/brave-fetcher/brave-search.ts",
+    "./cost-tracker": "./src/cost-tracker/cost-tracker.ts",
+    "./logger": "./src/logger/logger.ts",
+    "./llm-session-compactor": "./src/llm-session-compactor/compactor.ts",
+    "./run-context": "./src/run-context/run-context.ts"
+  },
+  "publish": {
+    "exclude": [
+      ".github",
+      "scripts",
+      "hooks",
+      "documents",
+      "**/*.test.ts",
+      "src/fetchers/local-fetcher/fixtures"
+    ]
+  },
   "tasks": {
     "check": "deno run -A ./scripts/task-check.ts",
     "test": "deno run -A ./scripts/task-test.ts",
