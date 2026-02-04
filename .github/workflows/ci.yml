@@ -78,8 +78,14 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to JSR
-        if: steps.create-release.outputs.released == 'true'
-        run: npx jsr publish --version ${{ steps.create-release.outputs.version }} --allow-dirty
+        if: |
+          github.event_name == 'push' && 
+          github.ref == 'refs/heads/main' && 
+          !contains(github.event.head_commit.message, 'chore(release):')
+        run: |
+          echo "Current version in package.json: $(node -p "require('./package.json').version")"
+          echo "Current version in deno.json: $(node -p "require('./deno.json').version")"
+          npx jsr publish --allow-dirty --verbose
 
       - name: Create GitHub Release
         if: steps.create-release.outputs.released == 'true'
