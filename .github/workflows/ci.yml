@@ -79,7 +79,7 @@ jobs:
 
       - name: Publish to JSR
         if: steps.create-release.outputs.released == 'true'
-        run: npx jsr publish --version ${{ steps.create-release.outputs.version }}
+        run: npx jsr publish --version ${{ steps.create-release.outputs.version }} --allow-dirty
 
       - name: Create GitHub Release
         if: steps.create-release.outputs.released == 'true'
