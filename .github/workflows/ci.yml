@@ -79,7 +79,7 @@ jobs:
 
       - name: Publish to JSR
         if: steps.create-release.outputs.released == 'true'
-        uses: jsr-io/publish@v1
+        uses: jsr-io/publish@main
         with:
           version: ${{ steps.create-release.outputs.version }}
 
