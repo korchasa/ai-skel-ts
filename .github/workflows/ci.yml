@@ -77,10 +77,6 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish to JSR
-        if: steps.create-release.outputs.released == 'true'
-        run: npx jsr publish --version ${{ steps.create-release.outputs.version }}
-
       - name: Create GitHub Release
         if: steps.create-release.outputs.released == 'true'
         uses: softprops/action-gh-release@v1
