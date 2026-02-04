@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.20](https://github.com/korchasa/ai-skel-ts/compare/v0.7.19...v0.7.20) (2026-02-04)
+
+
+### Bug Fixes
+
+* **ci:** add --allow-dirty to jsr publish ([1442575](https://github.com/korchasa/ai-skel-ts/commit/14425759e6d42ba8a431ccf9fcf84f025c6979df))
+
 ### [0.7.19](https://github.com/korchasa/ai-skel-ts/compare/v0.7.18...v0.7.19) (2026-02-04)
 
 
