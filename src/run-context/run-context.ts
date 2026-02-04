@@ -28,7 +28,7 @@ export interface RunContext {
 /**
  * Recursively sanitizes data for serialization, handling Errors, Buffers, and Circular references.
  */
-export function safeSanitize(obj: unknown, visited = new WeakSet()): unknown {
+export function safeSanitize(obj: unknown, visited: WeakSet<object> = new WeakSet()): unknown {
   if (obj === null || typeof obj !== "object") {
     return obj;
   }
