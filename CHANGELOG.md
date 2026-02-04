@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.21](https://github.com/korchasa/ai-skel-ts/compare/v0.7.20...v0.7.21) (2026-02-04)
+
+
+### Bug Fixes
+
+* **ci:** use [@main](https://github.com/main) for jsr-io/publish action ([668b156](https://github.com/korchasa/ai-skel-ts/commit/668b156818828d39de7cb4a43c118a2d95b2294c))
+
 ### [0.7.20](https://github.com/korchasa/ai-skel-ts/compare/v0.7.19...v0.7.20) (2026-02-04)
 
 
