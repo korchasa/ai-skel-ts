@@ -53,7 +53,7 @@ export class BraveSearchClient {
         this.ctx = ctx;
 
         // API key resolution: config parameter takes priority over environment variable
-        this.apiKey = config.apiKey || process.env.BRAVE_API_KEY || "";
+        this.apiKey = config.apiKey || Deno.env.get("BRAVE_API_KEY") || "";
 
         this.baseUrl = config.baseUrl || DEFAULT_BASE_URL;
 
@@ -100,7 +100,7 @@ export class BraveSearchClient {
                 timestamp,
             };
 
-            const logData: any = {
+            const logData: Record<string, unknown> = {
                 timestamp,
                 request: requestData,
             };
@@ -111,7 +111,7 @@ export class BraveSearchClient {
                     headers,
                 });
 
-                const responseDebugData: any = {
+                const responseDebugData: Record<string, unknown> = {
                     status: response.status,
                     statusText: response.statusText,
                     headers: Object.fromEntries(response.headers.entries()),
@@ -150,7 +150,7 @@ export class BraveSearchClient {
                     await this.saveDebugLog(logData, "brave-search-response");
 
                     return data as BraveSearchResponse;
-                } catch (error) {
+                } catch (_error) {
                     responseDebugData.error = "Failed to parse JSON response";
                     logData.response = responseDebugData;
                     await this.saveDebugLog(logData, "brave-search-error");
@@ -208,7 +208,7 @@ export class BraveSearchClient {
     /**
      * Saves combined request/response data as a YAML debug file.
      */
-    private async saveDebugLog(logData: any, suffix: string): Promise<void> {
+    private async saveDebugLog(logData: Record<string, unknown>, suffix: string): Promise<void> {
         if (this.ctx.saveDebugFile) {
             const yaml = yamlDump(logData, {
                 indent: 2,

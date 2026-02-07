@@ -1,5 +1,6 @@
-import { BraveSearchClient } from "./brave-search.ts";
+import { BraveSearchClient } from "./client.ts";
 import { createRunContext } from "../../run-context/run-context.ts";
+import type { Logger } from "../../logger/logger.ts";
 
 async function main() {
     console.log("Starting Brave Search verification...");
@@ -11,7 +12,7 @@ async function main() {
             info: console.log,
             warn: console.warn,
             error: console.error,
-        } as any,
+        } as unknown as Logger,
         debugDir: "./tmp/debug",
     });
 
@@ -43,8 +44,10 @@ async function main() {
 
     } catch (error) {
         console.error("Verification failed:", error);
-        process.exit(1);
+        Deno.exit(1);
     }
 }
 
-main().catch(console.error);
+if (import.meta.main) {
+    main().catch(console.error);
+}

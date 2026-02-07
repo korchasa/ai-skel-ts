@@ -1,20 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { expect } from "@std/expect";
 import { CostTracker } from "./cost-tracker.ts";
 
-describe("CostTracker", () => {
+Deno.test("CostTracker", async (t) => {
+  await t.step("getInstance() should return the same instance (singleton pattern)", () => {
+    const instance1 = CostTracker.getInstance();
+    const instance2 = CostTracker.getInstance();
 
-  describe("getInstance()", () => {
-    it("should return the same instance (singleton pattern)", () => {
-      const instance1 = CostTracker.getInstance();
-      const instance2 = CostTracker.getInstance();
-
-      expect(instance1).toBe(instance2);
-      expect(instance1 instanceof CostTracker).toBe(true);
-    });
+    expect(instance1).toBe(instance2);
+    expect(instance1 instanceof CostTracker).toBe(true);
   });
 
-  describe("addCost()", () => {
-    it("should add cost to total", () => {
+  await t.step("addCost()", async (t) => {
+    await t.step("should add cost to total", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -26,7 +23,7 @@ describe("CostTracker", () => {
       expect(report.requestCount).toBe(2);
     });
 
-    it("should increment request count for each cost addition", () => {
+    await t.step("should increment request count for each cost addition", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -38,7 +35,7 @@ describe("CostTracker", () => {
       expect(report.requestCount).toBe(3);
     });
 
-    it("should handle zero cost", () => {
+    await t.step("should handle zero cost", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -49,7 +46,7 @@ describe("CostTracker", () => {
       expect(report.requestCount).toBe(1);
     });
 
-    it("should handle negative cost", () => {
+    await t.step("should handle negative cost", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -61,8 +58,8 @@ describe("CostTracker", () => {
     });
   });
 
-  describe("addTokens()", () => {
-    it("should add input and output tokens", () => {
+  await t.step("addTokens()", async (t) => {
+    await t.step("should add input and output tokens", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -75,7 +72,7 @@ describe("CostTracker", () => {
       expect(report.totalTokens).toBe(425);
     });
 
-    it("should handle zero tokens", () => {
+    await t.step("should handle zero tokens", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -88,8 +85,8 @@ describe("CostTracker", () => {
     });
   });
 
-  describe("getReport()", () => {
-    it("should return complete cost report", () => {
+  await t.step("getReport()", async (t) => {
+    await t.step("should return complete cost report", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -107,7 +104,7 @@ describe("CostTracker", () => {
       expect(report.requestCount).toBe(2);
     });
 
-    it("should return zero values for new instance", () => {
+    await t.step("should return zero values for new instance", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -121,8 +118,8 @@ describe("CostTracker", () => {
     });
   });
 
-  describe("getFormattedReport()", () => {
-    it("should return human-readable formatted report", () => {
+  await t.step("getFormattedReport()", async (t) => {
+    await t.step("should return human-readable formatted report", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -136,7 +133,7 @@ describe("CostTracker", () => {
       expect(formatted).toContain("Total Requests: 1");
     });
 
-    it("should format cost with 4 decimal places", () => {
+    await t.step("should format cost with 4 decimal places", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -147,7 +144,7 @@ describe("CostTracker", () => {
       expect(formatted).toContain("Total Cost: $1.2346");
     });
 
-    it("should round cost to 4 decimal places", () => {
+    await t.step("should round cost to 4 decimal places", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -159,8 +156,8 @@ describe("CostTracker", () => {
     });
   });
 
-  describe("reset()", () => {
-    it("should reset all counters to zero", () => {
+  await t.step("reset()", async (t) => {
+    await t.step("should reset all counters to zero", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -177,7 +174,7 @@ describe("CostTracker", () => {
       expect(report.requestCount).toBe(0);
     });
 
-    it("should allow new tracking after reset", () => {
+    await t.step("should allow new tracking after reset", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 
@@ -191,8 +188,8 @@ describe("CostTracker", () => {
     });
   });
 
-  describe("integration scenarios", () => {
-    it("should handle complex usage scenario", () => {
+  await t.step("integration scenarios", async (t) => {
+    await t.step("should handle complex usage scenario", () => {
       const tracker = CostTracker.getInstance();
       tracker.reset();
 

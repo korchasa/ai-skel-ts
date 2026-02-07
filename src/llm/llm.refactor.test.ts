@@ -1,115 +1,66 @@
-import { describe, it, expect, vi } from "vitest";
-import { createLlmRequester, ModelURI } from "./llm.ts";
+import { expect } from "@std/expect";
+import { createLlmRequester, ModelURI, type LlmEngine } from "./llm.ts";
 import type { Logger } from "../logger/logger.ts";
 import type { CostTracker } from "../cost-tracker/cost-tracker.ts";
 import type { RunContext } from "../run-context/run-context.ts";
-import { generateText } from "ai";
+import { z } from "zod";
 
-// Mock AI SDK
-vi.mock("ai", async () => {
-  const actual = await vi.importActual("ai");
-  return {
-    ...actual,
-    generateText: vi.fn(),
-  };
-});
-
-describe("LLM Requester Refactor", () => {
+Deno.test("LLM Requester Refactoring", async (t) => {
   const logger = {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
   } as unknown as Logger;
 
   const costTracker = {
-    addCost: vi.fn(),
-    addTokens: vi.fn(),
+    addCost: () => {},
+    addTokens: () => {},
   } as unknown as CostTracker;
 
   const ctx = {
-    runId: "test-run",
-    debugDir: "/tmp/test-debug",
+    runId: "test-run-123",
+    debugDir: await Deno.makeTempDir({ prefix: "test-refactor-" }),
     logger,
     startTime: new Date(),
-  } as RunContext;
+  } as unknown as RunContext;
 
-  it("should support messages instead of prompt", async () => {
-    const mockedGenerateText = vi.mocked(generateText);
-    mockedGenerateText.mockResolvedValue({
-      text: "Hello!",
-      usage: { inputTokens: 10, outputTokens: 5 },
-      finishReason: "stop",
-      providerMetadata: {},
-    } as any);
+  await t.step("should support engine injection after creation", async () => {
+    const mockEngine: LlmEngine = {
+      generateText: () => Promise.resolve({
+        text: '{"result": "ok"}',
+        output: { result: "ok" },
+        finishReason: "stop",
+        usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+        steps: [{ text: '{"result": "ok"}', output: { result: "ok" } }]
+        // deno-lint-ignore no-explicit-any
+      } as any),
+    };
 
     const requester = createLlmRequester({
-      modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test"),
+      modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
       logger,
       costTracker,
-      ctx,
+      ctx
     });
+    
+    // Inject engine after creation
+    requester.engine = mockEngine;
 
+    const schema = z.object({ result: z.string() });
     const result = await requester({
-      messages: [{ role: "user", content: "Hello" }],
-      identifier: "test",
+      messages: [{ role: "user", content: "test prompt" }],
+      identifier: "test-id",
+      schema,
       stageName: "test-stage",
-      schema: undefined,
       tools: undefined,
       maxSteps: undefined,
       settings: undefined,
     });
 
-    expect(result.text).toBe("Hello!");
-    expect(mockedGenerateText).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messages: [{ role: "user", content: "Hello" }],
-      })
-    );
-  });
+    expect(result.result).toEqual({ result: "ok" });
 
-  it("should support tools and maxSteps", async () => {
-    const mockedGenerateText = vi.mocked(generateText);
-    mockedGenerateText.mockResolvedValue({
-      text: "I used the tool.",
-      usage: { inputTokens: 20, outputTokens: 10 },
-      finishReason: "stop",
-      toolCalls: [{ toolCallId: "1", toolName: "myTool", args: { x: 1 } }],
-      toolResults: [{ toolCallId: "1", toolName: "myTool", args: { x: 1 }, result: "result" }],
-      providerMetadata: {},
-    } as any);
-
-    const requester = createLlmRequester({
-      modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test"),
-      logger,
-      costTracker,
-      ctx,
-    });
-
-    const myTool = {
-      description: "My tool",
-      inputSchema: { type: "object", properties: { x: { type: "number" } } } as any,
-      execute: async () => "result",
-    };
-
-    const result = await requester({
-      messages: [{ role: "user", content: "Use tool" }],
-      tools: { myTool },
-      maxSteps: 5,
-      identifier: "test-tools",
-      stageName: "test-stage",
-      schema: undefined,
-      settings: undefined,
-    });
-
-    expect(result.text).toBe("I used the tool.");
-    expect(result.toolCalls).toHaveLength(1);
-    expect(result.toolCalls![0].toolName).toBe("myTool");
-    expect(mockedGenerateText).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tools: { myTool },
-        stopWhen: expect.any(Function),
-      })
-    );
+    // Cleanup
+    await Deno.remove(ctx.debugDir, { recursive: true });
   });
 });

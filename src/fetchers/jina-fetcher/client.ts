@@ -66,7 +66,7 @@ export class JinaScraper {
 
     // API key resolution: config parameter takes priority over environment variable
     // Throws error if neither is provided to ensure proper authentication
-    this.apiKey = config.apiKey || process.env.JINA_API_KEY || "";
+    this.apiKey = config.apiKey || Deno.env.get("JINA_API_KEY") || "";
 
     this.searchBaseUrl = config.searchBaseUrl || DEFAULT_SEARCH_BASE_URL;
     this.readerBaseUrl = config.readerBaseUrl || DEFAULT_READER_BASE_URL;
@@ -796,13 +796,13 @@ export class JinaScraper {
     const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data;
     const results = Array.isArray(data) ? data : (data.results || []);
 
-    return results.map((result: any) => this.mapToFetchResult(result, contentLimit));
+    return results.map((result: Record<string, unknown>) => this.mapToFetchResult(result, contentLimit));
   }
 
   /**
    * Maps Jina API response data to FetchContentResult format.
    */
-  private mapToFetchResult(data: any, contentLimit?: number): FetchContentResult {
+  private mapToFetchResult(data: Record<string, unknown>, contentLimit?: number): FetchContentResult {
     const limit = contentLimit ?? DEFAULT_CONTENT_LIMIT;
 
     // We don't use normalizeContent() here because it collapses all whitespace into a single space,

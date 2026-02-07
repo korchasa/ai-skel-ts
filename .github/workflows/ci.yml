@@ -21,17 +21,13 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
         with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --legacy-peer-deps
+          deno-version: v2.x
 
       - name: Run checks
-        run: npm run check
+        run: deno task check
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           ACCEPTANCE_TEST_MODEL: chat://openrouter/qwen/qwen2.5-coder-7b-instruct
@@ -56,11 +52,12 @@ jobs:
           fi
 
           if [ "$RELEASABLE" = "true" ]; then
-            npm run release
+            # We use deno task release which should handle versioning
+            deno task release
             git push --follow-tags origin main
             
-            # Получаем новую версию
-            NEW_VERSION=$(node -p "require('./package.json').version")
+            # Get new version from deno.json
+            NEW_VERSION=$(deno eval "console.log(JSON.parse(Deno.readTextFileSync('deno.json')).version)")
             echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
             echo "released=true" >> $GITHUB_OUTPUT
           else
@@ -69,18 +66,9 @@ jobs:
           fi
 
       - name: Publish to JSR
-        if: |
-          github.event_name == 'push' && 
-          github.ref == 'refs/heads/main' && 
-          !contains(github.event.head_commit.message, 'chore(release):')
+        if: steps.create-release.outputs.released == 'true'
         run: |
-          echo "Syncing version to deno.json"
-          VERSION=$(node -p "require('./package.json').version")
-          node -e "const fs = require('fs'); const deno = JSON.parse(fs.readFileSync('deno.json', 'utf8')); deno.version = '$VERSION'; fs.writeFileSync('deno.json', JSON.stringify(deno, null, 2) + '\n');"
-          
-          echo "Current version in package.json: $VERSION"
-          echo "Current version in deno.json: $(node -p "require('./deno.json').version")"
-          npx jsr publish --allow-dirty --verbose
+          deno publish --allow-dirty
 
       - name: Create GitHub Release
         if: steps.create-release.outputs.released == 'true'

@@ -96,11 +96,11 @@ async function main() {
 
   } catch (error) {
     console.error("Error:", error);
-    process.exit(1);
+    Deno.exit(1);
   }
 }
 
 // Run if this file is executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.main) {
   main();
 }

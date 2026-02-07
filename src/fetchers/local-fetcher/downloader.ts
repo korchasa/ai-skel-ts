@@ -91,11 +91,11 @@ export class Downloader {
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     // Prepare request headers
-    const requestHeaders = {
+    const requestHeaders: Record<string, string> = {
       accept: DEFAULT_ACCEPT_HEADER,
       "user-agent": DEFAULT_USER_AGENT,
-      ...(this.headers ?? {}),
-      ...(options.headers ?? {}),
+      ...(this.headers as Record<string, string> ?? {}),
+      ...(options.headers as Record<string, string> ?? {}),
     };
 
     // Save request debug info

@@ -18,7 +18,7 @@ async function main() {
   });
 
   // 1. Setup LLM (using mock for demo if no API key)
-  const apiKey = process.env.OPENROUTER_API_KEY || "dummy-key";
+  const apiKey = Deno.env.get("OPENROUTER_API_KEY") || "dummy-key";
   const modelUri = ModelURI.parse(`chat://openrouter/meta-llama/llama-3-8b-instruct?apiKey=${apiKey}`);
   
   const llm = createLlmRequester({
@@ -34,9 +34,9 @@ async function main() {
     inputSchema: zodSchema(z.object({
       city: z.string().describe("The city to get weather for"),
     })),
-    execute: async ({ city }: { city: string }) => {
+    execute: ({ city }: { city: string }) => {
       logger.info(`[Tool] Fetching weather for ${city}...`);
-      return `The weather in ${city} is sunny and 25°C.`;
+      return Promise.resolve(`The weather in ${city} is sunny and 25°C.`);
     },
   };
 
@@ -53,6 +53,7 @@ async function main() {
   // Mock init to add our dummy tool since we don't have a real MCP server running
   await agent.init();
   // Manually add tool for demo purposes
+  // deno-lint-ignore no-explicit-any
   (agent as any).tools["weather_tool"] = weatherTool;
 
   // 4. Chat
@@ -67,6 +68,6 @@ async function main() {
   logger.info(`Total Cost: $${report.totalCost.toFixed(6)}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1].endsWith('example.ts')) {
+if (import.meta.main) {
   main().catch(console.error);
 }

@@ -1,24 +1,24 @@
-import { describe, it } from "vitest";
-import { expect } from "vitest";
-import { readdirSync, readFileSync } from "node:fs";
+import { expect } from "@std/expect";
 import { fetch } from "./fetch-content.ts";
 import type { FetchContentResult } from "../types.ts";
 
 const fixturesRoot = "src/fetchers/local-fetcher/fixtures";
 
-describe("fetch-content E2E (acceptance)", () => {
-  const files = readdirSync(fixturesRoot, { withFileTypes: true });
-  const htmlFiles = files
-    .filter(entry => entry.isFile() && entry.name.endsWith(".html"))
-    .map(entry => entry.name);
+Deno.test("fetch-content E2E (acceptance)", async (t) => {
+  const htmlFiles: string[] = [];
+  for await (const entry of Deno.readDir(fixturesRoot)) {
+    if (entry.isFile && entry.name.endsWith(".html")) {
+      htmlFiles.push(entry.name);
+    }
+  }
 
   for (const htmlFile of htmlFiles) {
-    it(`should correctly extract content for: ${htmlFile}`, async () => {
+    await t.step(`should correctly extract content for: ${htmlFile}`, async () => {
       const htmlPath = `${fixturesRoot}/${htmlFile}`;
-      const html = readFileSync(htmlPath, "utf-8");
+      const html = await Deno.readTextFile(htmlPath);
 
       const jsonPath = htmlPath.replace(".html", ".json");
-      const expected = JSON.parse(readFileSync(jsonPath, "utf-8"));
+      const expected = JSON.parse(await Deno.readTextFile(jsonPath));
 
       const result = await fetch({
         html,
@@ -27,11 +27,15 @@ describe("fetch-content E2E (acceptance)", () => {
 
       const actual = normalizeResult(result);
 
-      // Map expected 'content' to 'text' if needed for comparison
       const expectedMapped = { ...expected };
       if (expectedMapped.content !== undefined) {
         expectedMapped.text = expectedMapped.content;
         delete expectedMapped.content;
+      }
+
+      // Special handling for date in expected
+      if (expectedMapped.date) {
+        expectedMapped.date = "EXISTS";
       }
 
       expect(actual).toEqual(expectedMapped);
@@ -49,7 +53,6 @@ function normalizeResult(result: FetchContentResult): Record<string, string | nu
     image: normalize(result.image),
     author: normalize(result.author),
     publisher: normalize(result.publisher),
-    // Skip exact date matching as metascraper might return current time for some pages
     date: result.date ? "EXISTS" : null,
     lang: normalize(result.lang),
     logo: normalize(result.logo),
@@ -80,4 +83,3 @@ function toAscii(input: string): string {
   output = output.normalize("NFKD").replace(/[^\x00-\x7F]/g, "");
   return output.replace(/\s+/g, " ").trim();
 }
-

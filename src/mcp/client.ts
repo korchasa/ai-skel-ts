@@ -96,23 +96,23 @@ export class McpClientWrapper {
         
         tools[toolName] = {
           description: tool.description,
-          inputSchema: jsonSchema(tool.inputSchema as any),
-          execute: async (args: any) => {
+          inputSchema: jsonSchema(tool.inputSchema as Record<string, unknown>),
+          execute: async (args: unknown) => {
             this.logger.debug(`[MCP:${this.name}] Calling tool ${tool.name}`, { args });
             const callResult = await this.client.request(
               {
                 method: "tools/call",
                 params: {
                   name: tool.name,
-                  arguments: args,
+                  arguments: args as Record<string, unknown>,
                 },
               },
               CallToolResultSchema
             );
 
-            const textContent = (callResult.content as any[])
-              .filter((c: any) => c.type === "text")
-              .map((c: any) => c.text)
+            const textContent = (callResult.content as Array<{ type: string; text?: string }>)
+              .filter((c) => c.type === "text")
+              .map((c) => c.text)
               .join("\n");
             
             return textContent || JSON.stringify(callResult.content);

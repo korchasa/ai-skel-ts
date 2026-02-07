@@ -18,7 +18,6 @@ import metascraperAudio from "metascraper-audio";
 import metascraperVideo from "metascraper-video";
 import { Readability } from "@mozilla/readability";
 import { JSDOM, VirtualConsole } from "jsdom";
-import type { RunContext } from "../../run-context/run-context.ts";
 import type { ExtractedData } from "../types.ts";
 
 /**
@@ -64,15 +63,15 @@ export async function extract({ html }: Readonly<{ html: string }>): Promise<Ext
   const metadataPromise = scraper({
     html,
     url: "https://example.com",
-  });
+  }) as Promise<Record<string, string | null>>;
 
   // Initialize JSDOM with virtual console to filter CSS errors
   const virtualConsole = new VirtualConsole();
-  virtualConsole.on("jsdomError", (error) => {
+  virtualConsole.on("jsdomError", (error: Error) => {
     if (error.message && error.message.includes("Could not parse CSS stylesheet")) {
       return;
     }
-    // eslint-disable-next-line no-console
+    // deno-lint-ignore no-console
     console.error("[JSDOM Error]", error);
   });
 
@@ -109,16 +108,16 @@ export async function extract({ html }: Readonly<{ html: string }>): Promise<Ext
   return {
     url: null, // Don't extract URL from metadata since we don't pass real URL
     canonicalUrl: null,
-    title: (metadata as { title?: string }).title ?? null,
-    description: (metadata as { description?: string }).description ?? null,
-    image: (metadata as { image?: string }).image ?? null,
-    author: (metadata as { author?: string }).author ?? null,
-    publisher: (metadata as { publisher?: string }).publisher ?? null,
-    date: (metadata as { date?: string }).date ?? null,
-    lang: (metadata as { lang?: string }).lang ?? null,
-    logo: (metadata as { logo?: string }).logo ?? null,
-    audio: (metadata as { audio?: string }).audio ?? null,
-    video: (metadata as { video?: string }).video ?? null,
+    title: metadata.title ?? null,
+    description: metadata.description ?? null,
+    image: metadata.image ?? null,
+    author: metadata.author ?? null,
+    publisher: metadata.publisher ?? null,
+    date: metadata.date ?? null,
+    lang: metadata.lang ?? null,
+    logo: metadata.logo ?? null,
+    audio: metadata.audio ?? null,
+    video: metadata.video ?? null,
     text,
     html: extractedHtml,
   };
