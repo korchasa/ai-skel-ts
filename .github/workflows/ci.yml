@@ -74,7 +74,11 @@ jobs:
           github.ref == 'refs/heads/main' && 
           !contains(github.event.head_commit.message, 'chore(release):')
         run: |
-          echo "Current version in package.json: $(node -p "require('./package.json').version")"
+          echo "Syncing version to deno.json"
+          VERSION=$(node -p "require('./package.json').version")
+          node -e "const fs = require('fs'); const deno = JSON.parse(fs.readFileSync('deno.json', 'utf8')); deno.version = '$VERSION'; fs.writeFileSync('deno.json', JSON.stringify(deno, null, 2) + '\n');"
+          
+          echo "Current version in package.json: $VERSION"
           echo "Current version in deno.json: $(node -p "require('./deno.json').version")"
           npx jsr publish --allow-dirty --verbose
 

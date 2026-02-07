@@ -489,7 +489,7 @@ src/
 - **GitHub Actions**: automated checks on push/PR
 - **Node.js 20**: runtime with npm cache
 - **Quality Gates**: ESLint (zero warnings), Vitest, TypeScript compilation
-- **Distribution**: npm (GitHub Packages) and JSR (jsr.io) publish flow
+- **Distribution**: npm (GitHub Packages) and JSR (jsr.io) publish flow with automatic version sync to `deno.json`.
 
 ### Package Management
 

@@ -122,7 +122,7 @@
 - **NFR-COMPAT-2**: ESM module system with TypeScript declarations
 - **NFR-COMPAT-3**: npm package distribution with JSR (jsr.io)
 - **NFR-COMPAT-4**: ES2022+ JavaScript features
-- **NFR-COMPAT-5**: Support JSR publication for Deno/Web ecosystem compatibility
+- **NFR-COMPAT-5**: Support JSR publication for Deno/Web ecosystem compatibility with automatic version synchronization from `package.json` to `deno.json` in CI.
 
 ### Maintainability (NFR-MAINT)
 - **NFR-MAINT-1**: Modular architecture with clear separation of concerns
