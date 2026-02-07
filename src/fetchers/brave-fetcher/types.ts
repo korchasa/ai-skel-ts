@@ -139,9 +139,9 @@ export interface BraveSearchResponse {
   };
   mixed: {
     type: "mixed";
-    main: any[];
-    top: any[];
-    side: any[];
+    main: unknown[];
+    top: unknown[];
+    side: unknown[];
   };
   type: "search";
   web?: BraveSearchWebResponse;

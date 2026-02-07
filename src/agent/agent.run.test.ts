@@ -1,26 +1,20 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { expect } from "@std/expect";
 import { Agent } from "./agent.ts";
 import type { LlmRequester } from "../llm/llm.ts";
 import type { RunContext } from "../run-context/run-context.ts";
 
-describe("Agent.run and history preservation", () => {
-  let llm: LlmRequester;
-  let ctx: RunContext;
+Deno.test("Agent.run and history preservation", async (t) => {
+  const ctx = {
+    runId: "test-run",
+    logger: {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    },
+  } as unknown as RunContext;
 
-  beforeEach(() => {
-    ctx = {
-      runId: "test-run",
-      logger: {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-      },
-    } as unknown as RunContext;
-  });
-
-  it("should preserve tool call history in the agent messages", async () => {
-    // 1. First call results in a tool call
+  await t.step("should preserve tool call history in the agent messages", async () => {
     const toolCallResult = {
       result: null,
       text: "",
@@ -35,7 +29,7 @@ describe("Agent.run and history preservation", () => {
       outputTokens: 0,
     };
 
-    llm = vi.fn().mockResolvedValue(toolCallResult);
+    const llm = (() => Promise.resolve(toolCallResult)) as unknown as LlmRequester;
 
     const agent = new Agent({
       llm,
@@ -47,21 +41,18 @@ describe("Agent.run and history preservation", () => {
     });
 
     await agent.init();
-    
-    // We expect run() to exist
-    const result = await (agent as any).run("Get some data");
+    const result = await agent.run("Get some data");
 
     expect(result).toEqual(toolCallResult);
     
-    // Check history preservation
     const history = agent.getHistory();
-    expect(history).toHaveLength(4); // user, assistant(call), tool(result), assistant(final)
+    expect(history).toHaveLength(4);
     expect(history[1].role).toBe("assistant");
     expect(history[2].role).toBe("tool");
     expect(history[3].role).toBe("assistant");
   });
 
-  it("chat() should use run() and return text", async () => {
+  await t.step("chat() should use run() and return text", async () => {
     const finalResult = {
       result: null,
       text: "Hello",
@@ -72,7 +63,7 @@ describe("Agent.run and history preservation", () => {
       outputTokens: 0,
     };
 
-    llm = vi.fn().mockResolvedValue(finalResult);
+    const llm = (() => Promise.resolve(finalResult)) as unknown as LlmRequester;
 
     const agent = new Agent({
       llm,
@@ -87,6 +78,6 @@ describe("Agent.run and history preservation", () => {
     const text = await agent.chat("Hi");
 
     expect(text).toBe("Hello");
-    expect(agent.getHistory()).toHaveLength(2); // user, assistant
+    expect(agent.getHistory()).toHaveLength(2);
   });
 });

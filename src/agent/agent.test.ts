@@ -1,31 +1,35 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { expect } from "@std/expect";
 import { Agent } from "./agent.ts";
+import type { Tool, ModelMessage } from "ai";
 import type { LlmRequester } from "../llm/llm.ts";
 import type { McpClientWrapper } from "../mcp/client.ts";
 import type { RunContext } from "../run-context/run-context.ts";
 import type { HistoryCompactor } from "../llm-session-compactor/compactor.ts";
 
-describe("Agent", () => {
+Deno.test("Agent", async (t) => {
   let llm: LlmRequester;
   let mcpClient: McpClientWrapper;
   let ctx: RunContext;
   let compactor: HistoryCompactor;
 
-  beforeEach(() => {
-    llm = vi.fn().mockResolvedValue({
+  const setup = () => {
+    llm = (() => Promise.resolve({
+      result: null,
       text: "Hello from LLM",
       estimatedCost: 0.01,
       inputTokens: 100,
       outputTokens: 50,
-    });
+      newMessages: [{ role: "assistant", content: "Hello from LLM" }],
+      steps: [],
+    })) as unknown as LlmRequester;
 
     mcpClient = {
-      connect: vi.fn(),
-      getTools: vi.fn().mockResolvedValue({
+      connect: () => Promise.resolve(),
+      getTools: () => Promise.resolve({
         "mcp__tool": {
           description: "A tool",
-          parameters: {} as any,
-          execute: vi.fn(),
+          parameters: {} as Record<string, unknown>,
+          execute: () => Promise.resolve(),
         },
       }),
     } as unknown as McpClientWrapper;
@@ -33,20 +37,29 @@ describe("Agent", () => {
     ctx = {
       runId: "test-run",
       logger: {
-        debug: vi.fn(),
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
       },
     } as unknown as RunContext;
 
     compactor = {
-      compact: vi.fn((msgs) => msgs),
-      estimateSymbols: vi.fn(() => 10),
-    } as unknown as HistoryCompactor;
-  });
+      compact: (msgs: readonly ModelMessage[]) => msgs,
+      estimateSymbols: () => 10,
+      // deno-lint-ignore no-explicit-any
+    } as any;
+  };
 
-  it("should initialize and aggregate tools", async () => {
+  await t.step("should initialize and aggregate tools", async () => {
+    setup();
+    let getToolsCalled = false;
+    const originalGetTools = mcpClient.getTools;
+    mcpClient.getTools = () => {
+      getToolsCalled = true;
+      return originalGetTools();
+    };
+
     const agent = new Agent({
       llm,
       mcpClients: [mcpClient],
@@ -57,13 +70,27 @@ describe("Agent", () => {
     });
 
     await agent.init();
-
-    expect(mcpClient.getTools).toHaveBeenCalled();
+    expect(getToolsCalled).toBe(true);
   });
 
-  it("should maintain chat history and call LLM", async () => {
+  await t.step("should maintain chat history and call LLM", async () => {
+    setup();
+    let capturedMessages: unknown[] = [];
+    const mockLlm = ((params: { messages: unknown[] }) => {
+      capturedMessages = params.messages;
+      return Promise.resolve({
+        result: null,
+        text: "Hello from LLM",
+        newMessages: [{ role: "assistant", content: "Hello from LLM" }],
+        steps: [],
+        estimatedCost: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      });
+    }) as unknown as LlmRequester;
+
     const agent = new Agent({
-      llm,
+      llm: mockLlm,
       mcpClients: [],
       ctx,
       systemPrompt: "You are a helpful assistant.",
@@ -75,17 +102,18 @@ describe("Agent", () => {
     const response = await agent.chat("Hi");
 
     expect(response).toBe("Hello from LLM");
-    expect(llm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messages: [
-          { role: "system", content: "You are a helpful assistant." },
-          { role: "user", content: "Hi" },
-        ],
-      })
-    );
+    expect(capturedMessages).toContainEqual({ role: "system", content: "You are a helpful assistant." });
+    expect(capturedMessages).toContainEqual({ role: "user", content: "Hi" });
   });
 
-  it("should use compactor when history grows", async () => {
+  await t.step("should use compactor when history grows", async () => {
+    setup();
+    let compactCalled = false;
+    compactor.compact = (msgs: readonly ModelMessage[]) => {
+      compactCalled = true;
+      return msgs;
+    };
+
     const agent = new Agent({
       llm,
       mcpClients: [],
@@ -98,21 +126,36 @@ describe("Agent", () => {
     await agent.init();
     await agent.chat("Message 1");
     
-    expect(compactor.compact).toHaveBeenCalled();
+    expect(compactCalled).toBe(true);
   });
 
-  it("should accept and use local tools", async () => {
+  await t.step("should accept and use local tools", async () => {
+    setup();
+    let capturedTools: Record<string, unknown> = {};
+    const mockLlm = ((params: { tools: Record<string, unknown> }) => {
+      capturedTools = params.tools;
+      return Promise.resolve({
+        result: null,
+        text: "Using local tool",
+        newMessages: [{ role: "assistant", content: "Using local tool" }],
+        steps: [],
+        estimatedCost: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+      });
+    }) as unknown as LlmRequester;
+
     const localTool = {
       description: "Local tool",
       parameters: { type: "object", properties: {} },
-      execute: vi.fn(),
+      execute: () => Promise.resolve(),
     };
 
     const agent = new Agent({
-      llm,
+      llm: mockLlm as unknown as LlmRequester,
       ctx,
       tools: {
-        "local_tool": localTool as any
+        "local_tool": localTool as unknown as Tool
       },
       mcpClients: undefined,
       systemPrompt: undefined,
@@ -122,12 +165,6 @@ describe("Agent", () => {
     await agent.init();
     await agent.chat("Use local tool");
 
-    expect(llm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tools: expect.objectContaining({
-          "local_tool": localTool
-        })
-      })
-    );
+    expect(capturedTools["local_tool"]).toBe(localTool);
   });
 });

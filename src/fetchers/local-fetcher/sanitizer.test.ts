@@ -1,12 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { expect } from "@std/expect";
 import { Sanitizer } from "./sanitizer.ts";
 import type { RunContext } from "../../run-context/run-context.ts";
 
-describe("Sanitizer", () => {
+Deno.test("Sanitizer", async (t) => {
   const sanitizer = new Sanitizer();
 
-  describe("sanitize", () => {
-    it("should remove script tags", async () => {
+  await t.step("sanitize", async (t) => {
+    await t.step("should remove script tags", async () => {
       const html = `
         <html>
           <head>
@@ -24,10 +24,10 @@ describe("Sanitizer", () => {
       expect(result).not.toContain("<script");
       expect(result).not.toContain("alert('dangerous')");
       expect(result).not.toContain("evil.js");
-      expect(result).toContain("Safe content", "Should keep safe content");
+      expect(result).toContain("Safe content");
     });
 
-    it("should remove style tags", async () => {
+    await t.step("should remove style tags", async () => {
       const html = `
         <html>
           <head>
@@ -43,10 +43,10 @@ describe("Sanitizer", () => {
 
       expect(result).not.toContain("<style");
       expect(result).not.toContain("color: red");
-      expect(result).toContain("Content", "Should keep content");
+      expect(result).toContain("Content");
     });
 
-    it("should preserve safe HTML tags while keeping text content", async () => {
+    await t.step("should preserve safe HTML tags while keeping text content", async () => {
       const html = `
         <div>
           <h1>Title</h1>
@@ -63,13 +63,13 @@ describe("Sanitizer", () => {
       expect(result).toContain("<h1");
       expect(result).toContain("<p");
       expect(result).toContain("<strong");
-      expect(result).toContain("Title", "Should keep heading text");
-      expect(result).toContain("Paragraph", "Should keep paragraph text");
-      expect(result).toContain("with bold", "Should keep nested text");
-      expect(result).toContain("Item 1", "Should keep list items");
+      expect(result).toContain("Title");
+      expect(result).toContain("Paragraph");
+      expect(result).toContain("with bold");
+      expect(result).toContain("Item 1");
     });
 
-    it("should remove noisy tags like svg and canvas", async () => {
+    await t.step("should remove noisy tags like svg and canvas", async () => {
       const html = `
         <div>
           <p>Text</p>
@@ -82,10 +82,10 @@ describe("Sanitizer", () => {
 
       expect(result).not.toContain("<svg");
       expect(result).not.toContain("<canvas");
-      expect(result).toContain("Text", "Should keep text content");
+      expect(result).toContain("Text");
     });
 
-    it("should remove iframe tags", async () => {
+    await t.step("should remove iframe tags", async () => {
       const html = `
         <div>
           <p>Content</p>
@@ -97,10 +97,10 @@ describe("Sanitizer", () => {
 
       expect(result).not.toContain("<iframe");
       expect(result).not.toContain("example.com");
-      expect(result).toContain("Content", "Should keep other content");
+      expect(result).toContain("Content");
     });
 
-    it("should remove object and embed tags", async () => {
+    await t.step("should remove object and embed tags", async () => {
       const html = `
         <div>
           <p>Content</p>
@@ -117,10 +117,10 @@ describe("Sanitizer", () => {
       expect(result).not.toContain("<embed");
       expect(result).not.toContain("<param");
       expect(result).not.toContain("movie.swf");
-      expect(result).toContain("Content", "Should keep other content");
+      expect(result).toContain("Content");
     });
 
-    it("should remove template tags", async () => {
+    await t.step("should remove template tags", async () => {
       const html = `
         <div>
           <p>Content</p>
@@ -134,10 +134,10 @@ describe("Sanitizer", () => {
 
       expect(result).not.toContain("<template");
       expect(result).not.toContain("Template content");
-      expect(result).toContain("Content", "Should keep other content");
+      expect(result).toContain("Content");
     });
 
-    it("should remove portal and other remaining forbidden tags", async () => {
+    await t.step("should remove portal and other remaining forbidden tags", async () => {
       const html = `
         <div>
           <p>Content</p>
@@ -164,22 +164,21 @@ describe("Sanitizer", () => {
       expect(result).not.toContain("area.html");
       expect(result).not.toContain("audio.mp3");
       expect(result).not.toContain("subtitles.vtt");
-      expect(result).toContain("Content", "Should keep other content");
+      expect(result).toContain("Content");
     });
 
-    it("should handle empty input", async () => {
+    await t.step("should handle empty input", async () => {
       const result = await sanitizer.sanitize({ html: "" });
-      expect(result).toBe("", "Should return empty string for empty input");
+      expect(result).toBe("");
     });
 
-    it("should handle input with only whitespace", async () => {
+    await t.step("should handle input with only whitespace", async () => {
       const html = "   \n\t  ";
       const result = await sanitizer.sanitize({ html });
-      // Cheerio output for empty/whitespace might vary, but should be valid HTML
       expect(result).toContain("<body");
     });
 
-    it("should save debug files if context is provided", async () => {
+    await t.step("should save debug files if context is provided", async () => {
       const savedFiles: Array<{ filename: string; content: string; stageDir?: string }> = [];
       const mockCtx = {
         saveDebugFile: (params: { filename: string; content: string; stageDir?: string }) => {
@@ -198,7 +197,7 @@ describe("Sanitizer", () => {
       expect(savedFiles[1].stageDir).toBe("sanitizer");
     });
 
-    it("should return whole document if input is whole document", async () => {
+    await t.step("should return whole document if input is whole document", async () => {
       const html = `<!DOCTYPE html><html><body><p>Hello</p></body></html>`;
       const result = await sanitizer.sanitize({ html });
 
@@ -207,13 +206,12 @@ describe("Sanitizer", () => {
       expect(result).toContain("<p>Hello</p>");
     });
 
-    it("should remove content inside forbidden tags", async () => {
+    await t.step("should remove content inside forbidden tags", async () => {
       const html = `
         <div>
           <p>Visible content</p>
           <script>
             var dangerous = function() {
-              // This should be removed
               alert('hacked!');
             };
           </script>
@@ -235,10 +233,10 @@ describe("Sanitizer", () => {
       expect(result).not.toContain("background: red");
       expect(result).not.toContain("template-content");
       expect(result).not.toContain("This should not appear");
-      expect(result).toContain("Visible content", "Should keep visible content");
+      expect(result).toContain("Visible content");
     });
 
-    it("should preserve all attributes including dangerous ones", async () => {
+    await t.step("should preserve all attributes including dangerous ones", async () => {
       const html = `
         <div>
           <img src="image.jpg" onload="alert('xss')" onerror="evil()" onclick="hack()">
@@ -253,7 +251,6 @@ describe("Sanitizer", () => {
 
       const result = await sanitizer.sanitize({ html });
 
-      // Attributes should be preserved
       expect(result).toContain("onload=");
       expect(result).toContain("onerror=");
       expect(result).toContain("onclick=");
@@ -263,16 +260,13 @@ describe("Sanitizer", () => {
       expect(result).toContain("style=");
       expect(result).toContain("color: red");
       expect(result).toContain("javascript:alert");
-      
-      // Standard attributes should definitely be preserved
       expect(result).toContain('id="safe-div"');
       expect(result).toContain('class="safe-class"');
       expect(result).toContain('data-info="safe-data"');
-      
-      expect(result).toContain("Link", "Should keep link text");
+      expect(result).toContain("Link");
     });
 
-    it("should handle malformed HTML gracefully", async () => {
+    await t.step("should handle malformed HTML gracefully", async () => {
       const html = `
         <div>
           <p>Unclosed paragraph
@@ -285,7 +279,6 @@ describe("Sanitizer", () => {
 
       const result = await sanitizer.sanitize({ html });
 
-      // Cheerio should fix structure and remove forbidden tags
       expect(result).not.toContain("<script");
       expect(result).not.toContain("<style");
       expect(result).not.toContain("Unclosed script");
@@ -294,7 +287,7 @@ describe("Sanitizer", () => {
       expect(result).toContain("Unclosed paragraph");
     });
 
-    it("should preserve unknown tags that are not in blacklist", async () => {
+    await t.step("should preserve unknown tags that are not in blacklist", async () => {
       const html = `
         <div>
            <invalid>Invalid tag content</invalid>
