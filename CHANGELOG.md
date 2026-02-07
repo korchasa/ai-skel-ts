@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.27](https://github.com/korchasa/ai-skel-ts/compare/v0.7.26...v0.7.27) (2026-02-07)
+
+
+### Chores
+
+* update @modelcontextprotocol/sdk to version 1.26.0 ([d40af63](https://github.com/korchasa/ai-skel-ts/commit/d40af634e6cc9dd5e5119cd282c3e5be42cfd035))
+
+
+### Code Refactoring
+
+* migrate from process.env to Deno.env and improve type safety ([682691d](https://github.com/korchasa/ai-skel-ts/commit/682691d7099f0bae9a7d35d6b3f914c5459ec65a))
+
+
+### Tests
+
+* update tests to use Deno-compatible syntax and improve coverage ([7400a50](https://github.com/korchasa/ai-skel-ts/commit/7400a50bcc361f44671f72a79386644ca7cc2471))
+
 ### [0.7.26](https://github.com/korchasa/ai-skel-ts/compare/v0.7.25...v0.7.26) (2026-02-07)
 
 ### [0.7.25](https://github.com/korchasa/ai-skel-ts/compare/v0.7.24...v0.7.25) (2026-02-07)

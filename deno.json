@@ -1,6 +1,6 @@
 {
   "name": "@korchasa/ai-skel-ts",
-  "version": "0.7.26",
+  "version": "0.7.27",
   "license": "MIT",
   "exports": {
     ".": "./mod.ts",
@@ -54,8 +54,7 @@
       "src/fetchers/local-fetcher/fixtures"
     ]
   },
-  "lint": {    
-  },
+  "lint": {},
   "tasks": {
     "check": "deno lint && deno test -A",
     "test": "deno test -A",
@@ -63,6 +62,11 @@
     "release": "deno run -A npm:standard-version --skip.tag"
   },
   "compilerOptions": {
-    "lib": ["dom", "dom.iterable", "dom.asynciterable", "deno.ns"]
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "dom.asynciterable",
+      "deno.ns"
+    ]
   }
 }
