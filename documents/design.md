@@ -476,12 +476,13 @@ src/
 - **Type Definitions**: Generated .d.ts files for TypeScript consumers
 - **Linting**: ESLint with TypeScript rules and zero warnings
 - **Testing**: Vitest with comprehensive test coverage
+- **Versioning**: Automated via `standard-version` configured for `deno.json` (see `.versionrc.json`).
 
 ### Task Automation
 
 - **Deno Tasks**: Root `deno.json` maps automation commands to scripts in `scripts/`
 - **Script Layout**: One task per file (`scripts/task-*.ts`) with shared helpers in `scripts/utils.ts`
-- **Commands**: `check`, `test`, `build`, `release` tasks shell out to npm workflows
+- **Commands**: `check`, `test`, `build`, `release` tasks shell out to npm workflows. `release` task uses `standard-version` to bump version in `deno.json`.
 - **Git Hooks**: `hooks/pre-commit` runs `deno task check`
 
 ### CI/CD Pipeline
