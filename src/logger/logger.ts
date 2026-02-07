@@ -1,4 +1,11 @@
 /**
+ * Structured logging module.
+ * Provides multi-level logging with context support and YAML-friendly output.
+ *
+ * @module
+ */
+
+/**
  * Supported log levels.
  */
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -31,6 +38,9 @@ export class Logger {
 
   /**
    * Logs a debug message.
+   *
+   * @param message - The message to log.
+   * @param meta - Optional metadata to include in the log.
    */
   debug(message: string, meta?: unknown): void {
     if (this.shouldLog("debug")) {
@@ -40,6 +50,9 @@ export class Logger {
 
   /**
    * Logs an info message.
+   *
+   * @param message - The message to log.
+   * @param meta - Optional metadata to include in the log.
    */
   info(message: string, meta?: unknown): void {
     if (this.shouldLog("info")) {
@@ -65,6 +78,9 @@ export class Logger {
 
   /**
    * Logs an error message.
+   *
+   * @param message - The message to log.
+   * @param error - Optional error object or metadata.
    */
   error(message: string, error?: unknown): void {
     if (this.shouldLog("error")) {

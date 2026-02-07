@@ -1,3 +1,10 @@
+/**
+ * LLM interaction module using Vercel AI SDK.
+ * Provides URI-based model configuration, retries, and structured logging.
+ *
+ * @module
+ */
+
 import type { z } from "zod";
 import { dump as yamlDump } from "js-yaml";
 import { mkdir, writeFile, stat } from "node:fs/promises";
@@ -104,6 +111,18 @@ export type LlmRequester = (<T>(
 export class ModelURI {
   private constructor(private readonly url: URL) {}
 
+  /**
+   * Parses a model URI into provider and model components.
+   *
+   * @param uri - The model URI to parse.
+   * @returns A ModelURI instance.
+   * @throws Error if the URI is invalid.
+   *
+   * @example
+   * ```ts
+   * const uri = ModelURI.parse("chat://openai/gpt-4o?temperature=0.7");
+   * ```
+   */
   static parse(uri: string): ModelURI {
     try {
       let normalizedUri = uri;
@@ -630,6 +649,15 @@ async function tryGenerateJson<T>(
 
 /**
  * Creates an LLM requester function.
+ *
+ * @param params - Parameters for the requester.
+ * @returns A function that can be used to make LLM requests.
+ *
+ * @example
+ * ```ts
+ * const requester = createLlmRequester({ modelUri, logger, costTracker, ctx });
+ * const result = await requester({ messages, identifier: "test", stageName: "test" });
+ * ```
  */
 export function createLlmRequester(params: LlmRequesterParams): LlmRequester {
   const { modelUri, logger, costTracker, ctx } = params;

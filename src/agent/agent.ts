@@ -1,3 +1,10 @@
+/**
+ * Stateful Agent module.
+ * Manages conversation history, integrates MCP tools, and handles LLM interactions.
+ *
+ * @module
+ */
+
 import type { ModelMessage, Tool } from "ai";
 import type { LlmRequester, GenerateResult } from "../llm/llm.ts";
 import type { McpClientWrapper } from "../mcp/client.ts";
@@ -65,6 +72,15 @@ export class Agent {
   /**
    * Sends a message to the agent and returns the full result.
    * This method preserves all intermediate tool calls and results in the history.
+   *
+   * @param input - The user message to process.
+   * @returns A promise that resolves to the generation result.
+   *
+   * @example
+   * ```ts
+   * const result = await agent.run("What is the weather in Tokyo?");
+   * console.log(result.text);
+   * ```
    */
   async run(input: string): Promise<GenerateResult<unknown>> {
     this.ctx.logger.debug(`[Agent] User: ${input}`);

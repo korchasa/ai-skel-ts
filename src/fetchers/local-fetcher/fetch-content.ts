@@ -1,3 +1,10 @@
+/**
+ * Local content fetcher module.
+ * Provides high-performance HTML extraction, sanitization, and normalization using Readability.
+ *
+ * @module
+ */
+
 import { extract } from "./extractor.ts";
 import { Downloader } from "./downloader.ts";
 import type { DownloaderOptions } from "./downloader.ts";

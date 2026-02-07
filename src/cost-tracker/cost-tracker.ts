@@ -1,3 +1,10 @@
+/**
+ * Cost tracking module for LLM usage.
+ * Monitors token consumption and estimated costs across the application.
+ *
+ * @module
+ */
+
 import { Logger } from "../logger/logger.ts";
 
 /**
@@ -38,6 +45,13 @@ export class CostTracker {
 
   /**
    * Adds cost to the total and increments request count.
+   *
+   * @param cost - The cost amount to add (usually in USD).
+   *
+   * @example
+   * ```ts
+   * tracker.addCost(0.002);
+   * ```
    */
   addCost(cost: number): void {
     this.totalCost += cost;
@@ -47,6 +61,14 @@ export class CostTracker {
 
   /**
    * Adds input and output tokens to the total.
+   *
+   * @param inputTokens - Number of input (prompt) tokens.
+   * @param outputTokens - Number of output (completion) tokens.
+   *
+   * @example
+   * ```ts
+   * tracker.addTokens(100, 50);
+   * ```
    */
   addTokens(inputTokens: number, outputTokens: number): void {
     this.totalInputTokens += inputTokens;

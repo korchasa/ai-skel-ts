@@ -1,3 +1,10 @@
+/**
+ * LLM session compaction module.
+ * Manages conversation history size via trimming or summarization while maintaining tool consistency.
+ *
+ * @module
+ */
+
 import type { ModelMessage } from "ai";
 import type { SummaryGenerator } from "./summary-generator.ts";
 import { log } from "../logger/logger.ts";

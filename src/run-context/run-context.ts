@@ -1,3 +1,10 @@
+/**
+ * Execution context module.
+ * Manages run-specific metadata, debug directories, and artifact persistence.
+ *
+ * @module
+ */
+
 import { join, dirname } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import type { Logger } from "../logger/logger.ts";
@@ -72,6 +79,14 @@ export function getSubDebugDir({ ctx, stageDir }: Readonly<{ ctx: RunContext; st
 
 /**
  * Creates a RunContext with a default reverse-sortable ISO timestamp runId.
+ *
+ * @param params - Configuration for the run context.
+ * @returns A new RunContext instance.
+ *
+ * @example
+ * ```ts
+ * const ctx = createRunContext({ logger, debugDir: "./debug" });
+ * ```
  */
 export function createRunContext(
   { logger, debugDir, runId }: Readonly<{
