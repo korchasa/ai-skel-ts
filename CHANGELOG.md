@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.26](https://github.com/korchasa/ai-skel-ts/compare/v0.7.25...v0.7.26) (2026-02-07)
+
 ### [0.7.25](https://github.com/korchasa/ai-skel-ts/compare/v0.7.24...v0.7.25) (2026-02-07)
 
 
