@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.24](https://github.com/korchasa/ai-skel-ts/compare/v0.7.21...v0.7.24) (2026-02-07)
+
+
+### Features
+
+* export z, Tool, and LlmSettings for consumer compatibility ([07a5e30](https://github.com/korchasa/ai-skel-ts/commit/07a5e302ff0b9d32e251b5a4610cd4925823f129))
+
+
+### Chores
+
+* bump version to 0.7.23 for JSR verification ([ccd202d](https://github.com/korchasa/ai-skel-ts/commit/ccd202d816b253d2d27d6f1429e195d94de7e3fa))
+
+
+### Continuous Integration
+
+* add debug logging and verbose mode to JSR publish step ([0083a99](https://github.com/korchasa/ai-skel-ts/commit/0083a999eefe350b4e32616f0e9f83c02f39c7df))
+* remove GitHub Packages publication ([4d71689](https://github.com/korchasa/ai-skel-ts/commit/4d71689984afbdae3939eaee31d3a42e4cd235b0))
+
 ### [0.7.21](https://github.com/korchasa/ai-skel-ts/compare/v0.7.20...v0.7.21) (2026-02-04)
 
 
