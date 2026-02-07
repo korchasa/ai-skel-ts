@@ -1,6 +1,6 @@
 {
   "name": "@korchasa/ai-skel-ts",
-  "version": "0.7.23",
+  "version": "0.7.24",
   "license": "MIT",
   "exports": {
     ".": "./mod.ts",
