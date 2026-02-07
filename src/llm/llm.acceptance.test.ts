@@ -56,7 +56,8 @@ describe("OpenRouter Acceptance Tests", () => {
     const modelUriString = process.env.ACCEPTANCE_TEST_MODEL || 'chat://openrouter/meta-llama/llama-3-8b-instruct';
 
     // Fail test if API key is not available and acceptance tests are not skipped
-    if (!apiKey && !skipAcceptanceTests) {
+    // Note: Secrets are not available for PRs from forks, so we skip instead of failing
+    if (!apiKey && !skipAcceptanceTests && process.env.GITHUB_ACTIONS !== 'true') {
       throw new Error(
         "OPENROUTER_API_KEY environment variable is required for acceptance tests. " +
         "Set it in your .env file, or set SKIP_ACCEPTANCE_TESTS=true to skip these tests."
