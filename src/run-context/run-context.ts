@@ -42,12 +42,12 @@ export function safeSanitize(obj: unknown, visited: WeakSet<object> = new WeakSe
       name: obj.name,
       message: obj.message,
       stack: obj.stack,
-      ...(obj as any),
+      ...(obj as unknown as Record<string, unknown>),
     };
   }
 
-  if (obj instanceof Buffer) {
-    return `[Buffer: ${obj.length} bytes]`;
+  if (obj && typeof obj === "object" && "constructor" in obj && obj.constructor.name === "Buffer") {
+    return `[Buffer: ${(obj as { length?: number }).length} bytes]`;
   }
 
   visited.add(obj);

@@ -66,7 +66,7 @@ export class Agent {
    * Sends a message to the agent and returns the full result.
    * This method preserves all intermediate tool calls and results in the history.
    */
-  async run(input: string): Promise<GenerateResult<any>> {
+  async run(input: string): Promise<GenerateResult<unknown>> {
     this.ctx.logger.debug(`[Agent] User: ${input}`);
     
     // 1. Add user message

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import type { z } from "zod";
 import { dump as yamlDump } from "js-yaml";
 import { mkdir, writeFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
@@ -9,7 +9,6 @@ import { getSubDebugDir } from "../run-context/run-context.ts";
 import {
   generateText,
   Output,
-  NoObjectGeneratedError,
   stepCountIs,
   zodSchema,
   type ModelMessage,
@@ -18,8 +17,26 @@ import {
   JSONParseError,
   APICallError,
   type LanguageModel,
-  type CallSettings
+  type CallSettings,
+  NoObjectGeneratedError
 } from "ai";
+
+/**
+ * Interface for the underlying generation engine to allow mocking in tests.
+ */
+export interface LlmEngine {
+  // deno-lint-ignore no-explicit-any
+  generateText<T>(params: Record<string, any>): Promise<any>;
+}
+
+/**
+ * Default implementation using Vercel AI SDK.
+ */
+export const defaultLlmEngine: LlmEngine = {
+  // deno-lint-ignore no-explicit-any
+  generateText: (params: any) => generateText(params),
+};
+
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
@@ -31,12 +48,12 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 export interface GenerateResult<T> {
   readonly result: T | null; // For structured output
   readonly text?: string;    // For conversational output
-  readonly toolCalls?: Array<{ toolCallId: string; toolName: string; args: any }>;
-  readonly toolResults?: Array<{ toolCallId: string; toolName: string; args: any; result: any }>;
+  readonly toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>;
+  readonly toolResults?: Array<{ toolCallId: string; toolName: string; args: unknown; result: unknown }>;
   /** All messages generated during this request (including tool calls and results) */
   readonly newMessages: ModelMessage[];
   /** Detailed steps from the underlying LLM provider */
-  readonly steps: any[];
+  readonly steps: unknown[];
   readonly estimatedCost: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -63,7 +80,7 @@ export type LlmSettings = CallSettings & {
  * You can use zod's .refine() or .superRefine() for complex validation with self-correction.
  * Errors from these methods will be sent back to the LLM for correction.
  */
-export type LlmRequester = <T>(
+export type LlmRequester = (<T>(
   params: Readonly<{
     messages: ModelMessage[];
     identifier: string;
@@ -73,7 +90,7 @@ export type LlmRequester = <T>(
     stageName: string;
     settings: LlmSettings | undefined;
   }>
-) => Promise<GenerateResult<T>>;
+) => Promise<GenerateResult<T>>) & { engine?: LlmEngine };
 
 /**
  * Represents a parsed Model URI.
@@ -186,7 +203,7 @@ interface YamlResponseData {
   readonly raw: string;
   readonly parsed: unknown;
   readonly error?: string;
-  readonly steps?: any[];
+  readonly steps?: unknown[];
 }
 
 /**
@@ -268,7 +285,7 @@ function parseModelUri({ uri }: Readonly<{ uri: ModelURI }>): ParsedModelUri {
   if (!result.apiKey) {
     const provider = result.provider;
     const envKey = `${provider.toUpperCase()}_API_KEY`;
-    const envValue = process.env[envKey];
+    const envValue = Deno.env.get(envKey);
     if (envValue) {
       (result as { apiKey?: string }).apiKey = envValue;
     }
@@ -338,7 +355,7 @@ function sanitizeForYaml(obj: unknown, visited = new WeakSet()): unknown {
       name: obj.name,
       message: obj.message,
       stack: obj.stack,
-      ...(obj as any),
+      ...(obj as unknown as Record<string, unknown>),
     };
   }
 
@@ -394,7 +411,7 @@ function calculateRetryDelay({ attempt }: Readonly<{ attempt: number }>): number
  * .refine() and .superRefine().
  */
 async function tryGenerateJson<T>(
-  { identifier, schema, tools, maxSteps, attempt, messages, ctx, modelInstance, maskedUri, costTracker, logger, settings }: Readonly<{
+  { identifier, schema, tools, maxSteps, attempt, messages, ctx, modelInstance, maskedUri, costTracker, logger, settings, engine }: Readonly<{
     identifier: string;
     schema: z.ZodType<T> | undefined;
     tools: Record<string, Tool> | undefined;
@@ -407,6 +424,7 @@ async function tryGenerateJson<T>(
     costTracker: CostTracker;
     logger: Logger;
     settings: LlmSettings | undefined;
+    engine: LlmEngine;
   }>
 ): Promise<GenerateResult<T> & { logAttempt: YamlLogAttempt }> {
   const timestamp = new Date().toISOString();
@@ -431,7 +449,7 @@ async function tryGenerateJson<T>(
         // Use generateText with Output.object if schema is present
         let result;
         try {
-          result = await generateText({
+          result = await engine.generateText<T>({
             model: modelInstance,
             output: schema ? Output.object({ schema: zodSchema(schema) }) : Output.text(),
             messages,
@@ -440,7 +458,7 @@ async function tryGenerateJson<T>(
             stopWhen: maxSteps ? stepCountIs(maxSteps) : undefined,
             abortSignal: controller.signal,
             ...settings,
-          });
+          } as Record<string, unknown>);
         } finally {
           clearTimeout(timeoutId);
         }
@@ -490,13 +508,13 @@ async function tryGenerateJson<T>(
               newMessages.push({
                 role: "assistant",
                 content: step.toolCalls && step.toolCalls.length > 0 
-                  ? (step.text ? [{ type: 'text', text: step.text }, ...step.toolCalls.map((tc: any) => ({ type: 'tool-call', ...tc }))] : step.toolCalls.map((tc: any) => ({ type: 'tool-call', ...tc })))
+                  ? (step.text ? [{ type: 'text', text: step.text }, ...step.toolCalls.map((tc: unknown) => ({ type: 'tool-call', ...(tc as Record<string, unknown>) }))] : step.toolCalls.map((tc: unknown) => ({ type: 'tool-call', ...(tc as Record<string, unknown>) })))
                   : step.text
               } as ModelMessage);
             }
             if (step.toolResults && step.toolResults.length > 0) {
               for (const tr of step.toolResults) {
-                const toolResult = tr as any;
+                const toolResult = tr as Record<string, unknown>;
                 newMessages.push({
                   role: "tool",
                   content: [{
@@ -514,8 +532,8 @@ async function tryGenerateJson<T>(
         return {
           result: (result.output as T) ?? null,
           text: result.text,
-          toolCalls: result.toolCalls as any,
-          toolResults: result.toolResults as any,
+          toolCalls: result.toolCalls as unknown as Array<{ toolCallId: string; toolName: string; args: unknown }>,
+          toolResults: result.toolResults as unknown as Array<{ toolCallId: string; toolName: string; args: unknown; result: unknown }>,
           newMessages,
           steps: result.steps ?? [],
           estimatedCost: cost,
@@ -614,19 +632,20 @@ async function tryGenerateJson<T>(
  * Creates an LLM requester function.
  */
 export function createLlmRequester(params: LlmRequesterParams): LlmRequester {
-
   const { modelUri, logger, costTracker, ctx } = params;
   const parsed = parseModelUri({ uri: modelUri });
   const { settings: defaultSettings } = parsed;
 
   if (parsed.logVercelWarnings === false) {
+    // deno-lint-ignore no-explicit-any
     (globalThis as any).AI_SDK_LOG_WARNINGS = false;
   }
 
   const modelInstance = createModelInstance({ parsed });
   const maskedUri = modelUri.toString();
 
-  return async <T>(
+  // deno-lint-ignore no-explicit-any
+  const requester: any = async <T>(
     { messages: inputMessages, prompt, identifier, schema, tools, maxSteps, stageName, settings }: Readonly<{
       messages?: ModelMessage[];
       prompt?: string;
@@ -680,7 +699,8 @@ export function createLlmRequester(params: LlmRequesterParams): LlmRequester {
         maskedUri,
         costTracker,
         logger,
-        settings: mergedSettings
+        settings: mergedSettings,
+        engine: requester.engine || defaultLlmEngine
       });
 
       // Update log file with attempt data
@@ -711,4 +731,7 @@ export function createLlmRequester(params: LlmRequesterParams): LlmRequester {
     }
     return { result: null, newMessages: [], steps: [], estimatedCost: 0, inputTokens: 0, outputTokens: 0 };
   };
+
+  requester.engine = defaultLlmEngine;
+  return requester as LlmRequester;
 }
