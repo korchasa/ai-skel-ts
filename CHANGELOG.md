@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.25](https://github.com/korchasa/ai-skel-ts/compare/v0.7.24...v0.7.25) (2026-02-07)
+
+
+### Bug Fixes
+
+* **test:** skip acceptance tests in CI if API key is missing ([19e5e65](https://github.com/korchasa/ai-skel-ts/commit/19e5e658ce2b71819a61ef83630f2fbba6704e6f))
+
+
+### Documentation
+
+* **agent:** update agent rules for error analysis ([8bb0f97](https://github.com/korchasa/ai-skel-ts/commit/8bb0f975633bb1a98d32a2e67d58b0481c10e6f9))
+
 ### [0.7.24](https://github.com/korchasa/ai-skel-ts/compare/v0.7.21...v0.7.24) (2026-02-07)
 
 
