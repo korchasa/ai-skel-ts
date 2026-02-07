@@ -391,7 +391,7 @@ export type LlmRequester = <T>(params: {
 
 ### Export Strategy
 
-- **mod.ts**: Public API surface
+- **mod.ts**: Public API surface. Re-exports core components (`LlmRequester`, `Agent`, `Logger`, `RunContext`, `CostTracker`) and critical dependencies (`z` from `zod`, `ModelMessage` and `Tool` from `ai`) to ensure type compatibility and version consistency for consumers.
 - **Submodule exports**: `llm/`, `fetch-content/`, etc.
 - **Type-only exports**: Zod schemas and utility types
 

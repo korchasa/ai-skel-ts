@@ -16,6 +16,7 @@ export {
   ModelURI,
   type LlmRequester,
   type LlmRequesterParams,
+  type LlmSettings,
   type GenerateResult,
 } from "./src/llm/llm.ts";
 
@@ -84,5 +85,5 @@ export {
 } from "./src/run-context/run-context.ts";
 
 // Re-export commonly used types from dependencies
-export type { ModelMessage } from "ai";
+export type { ModelMessage, Tool } from "ai";
 export { z } from "zod";
