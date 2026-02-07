@@ -86,4 +86,4 @@ export {
 
 // Re-export commonly used types from dependencies
 export type { ModelMessage, Tool } from "ai";
-export { z } from "zod";
+export { z, ZodError, type ZodType, type ZodIssue } from "zod";
