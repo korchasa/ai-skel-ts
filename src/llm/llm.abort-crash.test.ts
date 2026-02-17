@@ -27,6 +27,7 @@ Deno.test("LLM Abort Crash", async (t) => {
 
   await t.step("should handle abort without crashing", async () => {
     const mockEngine: LlmEngine = {
+      streamText: () => ({}),
       generateText: (params: Record<string, unknown>) => {
         const signal = params.abortSignal as AbortSignal | undefined;
         if (signal?.aborted) {

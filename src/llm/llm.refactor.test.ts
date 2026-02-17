@@ -27,6 +27,7 @@ Deno.test("LLM Requester Refactoring", async (t) => {
 
   await t.step("should support engine injection after creation", async () => {
     const mockEngine: LlmEngine = {
+      streamText: () => ({}),
       generateText: () => Promise.resolve({
         text: '{"result": "ok"}',
         output: { result: "ok" },

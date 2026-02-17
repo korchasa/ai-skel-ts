@@ -28,6 +28,7 @@ Deno.test("LLM Tools Support", async (t) => {
 
   await t.step("should handle tool calls correctly", async () => {
     const mockEngine: LlmEngine = {
+      streamText: () => ({}),
       generateText: () => Promise.resolve({
         text: "Calling tool...",
         output: null,

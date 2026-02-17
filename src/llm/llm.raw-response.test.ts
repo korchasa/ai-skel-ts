@@ -35,6 +35,7 @@ Deno.test("LLM Raw Response Logging", async (t) => {
   await t.step("should log raw response even on validation error", async () => {
     const rawText = '{"invalid": "json"';
     const mockEngine: LlmEngine = {
+      streamText: () => ({}),
       generateText: () => Promise.resolve({
         text: rawText,
         output: null,

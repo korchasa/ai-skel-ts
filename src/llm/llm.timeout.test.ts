@@ -26,6 +26,7 @@ Deno.test("LLM Timeout", async (t) => {
   } as unknown as RunContext;
 
   const mockTimeoutEngine: LlmEngine = {
+    streamText: () => ({}),
     generateText: (params: Record<string, unknown>) => {
       return new Promise((_resolve, reject) => {
         const signal = params.abortSignal as AbortSignal | undefined;
