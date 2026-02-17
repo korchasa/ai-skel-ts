@@ -14,6 +14,8 @@
 - **FR-LLM-9**: Return all generated messages (`newMessages`) and detailed execution steps (`steps`) for observability
 - **FR-LLM-10**: Support `toolChoice` parameter to control tool calling behavior
 - **FR-LLM-11**: Ensure `AbortController.abort()` calls are protected from listener exceptions to prevent process crashes
+- **FR-LLM-12**: Support real-time streaming via `LlmRequester.stream` (`LlmStreamer` function) returning `StreamResult<T>` with `textStream`, `fullStream`, and promise-based final values
+- **FR-LLM-13**: For structured output streaming, buffer and retry internally (max 3 attempts); consumer receives only the successful attempt's stream
 
 ### Agent (FR-AGENT)
 - **FR-AGENT-1**: Maintain stateful conversation history (`ModelMessage[]`)
@@ -23,6 +25,7 @@
 - **FR-AGENT-5**: Support local tool definition and execution injected directly into the agent
 - **FR-AGENT-6**: Provide `run()` method for full access to execution results and `chat()` for simple text output
 - **FR-AGENT-7**: Automatically preserve all intermediate tool calls and results in conversation history
+- **FR-AGENT-8**: Provide `streamRun()` returning `Promise<StreamResult<unknown>>` and `streamChat()` as `AsyncGenerator<string>` for real-time streaming with automatic history update on completion
 
 ### MCP Integration (FR-MCP)
 - **FR-MCP-1**: Connect to MCP servers via stdio or SSE

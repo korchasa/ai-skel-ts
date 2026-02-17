@@ -17,9 +17,9 @@ deno add jsr:@korchasa/ai-skel-ts
 
 ## Core Capabilities
 
-- Provider-agnostic LLM requester via `ModelURI` (`chat://provider/model`)
-- Structured output with Zod validation and retry-based self-correction
-- Stateful `Agent` with optional local tools and MCP tools
+- Provider-agnostic LLM requester via `ModelURI` (`chat://provider/model`) with streaming support
+- Structured output with Zod validation, retry-based self-correction, and streaming
+- Stateful `Agent` with optional local tools, MCP tools, and streaming capabilities
 - Conversation compaction (`SimpleHistoryCompactor`, `SummarizingHistoryCompactor`)
 - Local HTML content extraction (`fetch`, `fetchFromURL`)
 - Jina reader/search client (`JinaScraper`)
@@ -64,6 +64,26 @@ const result = await llm({
 console.log(result.result?.message);
 ```
 
+### Streaming LLM
+
+```ts
+const stream = await llm.stream({
+  messages: [{ role: "user", content: "Write a long poem about TypeScript" }],
+  identifier: "streaming-demo",
+  schema: undefined,
+  tools: undefined,
+  maxSteps: undefined,
+  stageName: "readme-stream",
+});
+
+for await (const chunk of stream.textStream) {
+  process.stdout.write(chunk);
+}
+
+const finalUsage = await stream.usage;
+console.log(`Total tokens: ${finalUsage.inputTokens + finalUsage.outputTokens}`);
+```
+
 ### Stateful Agent
 
 ```ts
@@ -86,6 +106,11 @@ const agent = new Agent({
 await agent.init();
 const reply = await agent.chat("Summarize the main idea of this library.");
 console.log(reply);
+
+// Streaming with Agent
+for await (const chunk of agent.streamChat("Tell me a joke")) {
+  process.stdout.write(chunk);
+}
 ```
 
 ### Local Content Fetching

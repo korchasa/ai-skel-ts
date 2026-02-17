@@ -15,6 +15,7 @@ import type { RunContext } from "../run-context/run-context.ts";
 import { getSubDebugDir } from "../run-context/run-context.ts";
 import {
   generateText,
+  streamText,
   Output,
   stepCountIs,
   zodSchema,
@@ -34,6 +35,8 @@ import {
 export interface LlmEngine {
   // deno-lint-ignore no-explicit-any
   generateText<T>(params: Record<string, any>): Promise<any>;
+  // deno-lint-ignore no-explicit-any
+  streamText(params: Record<string, any>): any;
 }
 
 /**
@@ -42,6 +45,8 @@ export interface LlmEngine {
 export const defaultLlmEngine: LlmEngine = {
   // deno-lint-ignore no-explicit-any
   generateText: (params: any) => generateText(params),
+  // deno-lint-ignore no-explicit-any
+  streamText: (params: any) => streamText(params),
 };
 
 import { createOpenAI } from "@ai-sdk/openai";
@@ -71,6 +76,73 @@ export interface GenerateResult<T> {
 }
 
 /**
+ * Streaming result of a generation request to an LLM.
+ * Mirrors GenerateResult but provides async iterables and promise-based final values.
+ */
+export interface StreamResult<T> {
+  /**
+   * Async iterable of text chunks as they arrive.
+   *
+   * **Text-only mode**: chunks are yielded in real time from the LLM provider.
+   *
+   * **Structured mode** (with schema): the entire validated text is replayed as a
+   * single chunk after internal buffering and retry. Consumer sees one yield.
+   */
+  readonly textStream: AsyncIterable<string>;
+  /**
+   * Async iterable of all stream parts (text-delta, tool-call, tool-result, finish, etc.).
+   *
+   * **Text-only mode**: parts come directly from the Vercel AI SDK `streamText` result.
+   *
+   * **Structured mode**: synthetic events are replayed after validation. Only `text-delta`
+   * and `finish` events are emitted; intermediate events (tool-call, step-finish, etc.)
+   * from failed attempts are not included.
+   */
+  // deno-lint-ignore no-explicit-any
+  readonly fullStream: AsyncIterable<any>;
+  /** Promise that resolves to the full generated text. */
+  readonly text: Promise<string>;
+  /** Promise that resolves to the structured output (null for text-only requests). */
+  readonly output: Promise<T | null>;
+  /** Promise that resolves to tool calls made during generation. */
+  readonly toolCalls: Promise<Array<{ toolCallId: string; toolName: string; args: unknown }>>;
+  /** Promise that resolves to tool results from executed tools. */
+  readonly toolResults: Promise<Array<{ toolCallId: string; toolName: string; args: unknown; result: unknown }>>;
+  /**
+   * Promise that resolves to all new messages generated during this request.
+   * Does not resolve until the stream finishes — consumer must fully consume the
+   * stream (or await another final promise like `text`) before relying on this value.
+   */
+  readonly newMessages: Promise<ModelMessage[]>;
+  /** Promise that resolves to detailed steps from the underlying LLM provider. */
+  readonly steps: Promise<unknown[]>;
+  /** Promise that resolves to token usage statistics. */
+  readonly usage: Promise<{ inputTokens: number; outputTokens: number }>;
+  /**
+   * Promise that resolves to the estimated cost of this request.
+   * Cost is extracted from provider metadata when available (e.g. OpenRouter).
+   * For providers that do not expose cost metadata, this resolves to `0`.
+   */
+  readonly estimatedCost: Promise<number>;
+}
+
+/**
+ * Type for LLM streamer function.
+ * Returned by LlmRequester.stream.
+ */
+export type LlmStreamer = <T>(
+  params: Readonly<{
+    messages: ModelMessage[];
+    identifier: string;
+    schema: z.ZodType<T> | undefined;
+    tools: Record<string, Tool> | undefined;
+    maxSteps: number | undefined;
+    stageName: string;
+    settings: LlmSettings | undefined;
+  }>
+) => StreamResult<T>;
+
+/**
  * Supported LLM generation settings.
  */
 export type LlmSettings = CallSettings & {
@@ -97,7 +169,7 @@ export type LlmRequester = (<T>(
     stageName: string;
     settings: LlmSettings | undefined;
   }>
-) => Promise<GenerateResult<T>>) & { engine?: LlmEngine };
+) => Promise<GenerateResult<T>>) & { engine?: LlmEngine; stream: LlmStreamer };
 
 /**
  * Represents a parsed Model URI.
@@ -266,6 +338,41 @@ const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000;
 
 /**
+ * Aggregates new ModelMessages from LLM steps (shared by both generate and stream paths).
+ */
+// deno-lint-ignore no-explicit-any
+function buildNewMessagesFromSteps(steps: any[]): ModelMessage[] {
+  const newMessages: ModelMessage[] = [];
+  for (const step of steps) {
+    if (step.text || (step.toolCalls && step.toolCalls.length > 0)) {
+      newMessages.push({
+        role: "assistant",
+        content: step.toolCalls && step.toolCalls.length > 0
+          ? (step.text
+            ? [{ type: 'text', text: step.text }, ...step.toolCalls.map((tc: unknown) => ({ type: 'tool-call', ...(tc as Record<string, unknown>) }))]
+            : step.toolCalls.map((tc: unknown) => ({ type: 'tool-call', ...(tc as Record<string, unknown>) })))
+          : step.text
+      } as ModelMessage);
+    }
+    if (step.toolResults && step.toolResults.length > 0) {
+      for (const tr of step.toolResults) {
+        const toolResult = tr as Record<string, unknown>;
+        newMessages.push({
+          role: "tool",
+          content: [{
+            type: 'tool-result',
+            toolCallId: toolResult.toolCallId,
+            toolName: toolResult.toolName,
+            result: toolResult.result ?? null,
+          }]
+        } as unknown as ModelMessage);
+      }
+    }
+  }
+  return newMessages;
+}
+
+/**
  * Parses a model URI into provider and model components.
  */
 function parseModelUri({ uri }: Readonly<{ uri: ModelURI }>): ParsedModelUri {
@@ -424,6 +531,291 @@ function calculateRetryDelay({ attempt }: Readonly<{ attempt: number }>): number
 }
 
 /**
+ * Internal result shape for the structured-output buffered retry loop.
+ * Defined at module level for consistency with other internal interfaces.
+ */
+interface StructuredWorkResult<T> {
+  textBuffer: string[];
+  output: T;
+  usage: { inputTokens: number; outputTokens: number };
+  cost: number;
+  // deno-lint-ignore no-explicit-any
+  steps: any[];
+  // deno-lint-ignore no-explicit-any
+  toolCalls: any[];
+  // deno-lint-ignore no-explicit-any
+  toolResults: any[];
+}
+
+/**
+ * Internal helper for streaming text generation.
+ *
+ * Two modes:
+ * - Text-only (no schema): real-time streaming, chunks yielded immediately.
+ * - Structured (with schema): buffered retry loop — consumer sees only the successful attempt.
+ */
+function tryStreamText<T>(
+  { identifier, schema, tools, maxSteps, messages, ctx, modelInstance, maskedUri, costTracker, logger, settings, engine, _stageName }: Readonly<{
+    identifier: string;
+    schema: z.ZodType<T> | undefined;
+    tools: Record<string, Tool> | undefined;
+    maxSteps: number | undefined;
+    messages: ModelMessage[];
+    ctx: RunContext;
+    modelInstance: LanguageModel;
+    maskedUri: string;
+    costTracker: CostTracker;
+    logger: Logger;
+    settings: LlmSettings | undefined;
+    engine: LlmEngine;
+    /** Stage name for future debug file logging (not yet used in streaming path). */
+    _stageName: string;
+  }>
+): StreamResult<T> {
+  void _stageName; // Reserved for future YAML debug file logging in streaming path
+  const startTime = Date.now();
+  const timeoutMs = settings?.timeout ?? 30000;
+
+  if (!schema) {
+    // ── Text-only: direct streaming, no buffering ──────────────────────────────
+    logger.debug(
+      `[LLM] [run:${ctx.runId}] [id:${identifier}] 🚀 Stream request: model=${maskedUri}, timeout=${timeoutMs}ms`
+    );
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      try {
+        controller.abort();
+      } catch (error) {
+        logger.warn(`[LLM] Error during stream abort(): ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }, timeoutMs);
+
+    const rawResult = engine.streamText({
+      model: modelInstance,
+      output: Output.text(),
+      messages,
+      tools,
+      toolChoice: settings?.toolChoice,
+      stopWhen: maxSteps ? stepCountIs(maxSteps) : undefined,
+      abortSignal: controller.signal,
+      ...settings,
+    } as Record<string, unknown>);
+
+    // Side effect: update token tracker when stream completes. Also clears timeout guard.
+    const usagePromise = (rawResult.usage as Promise<{ inputTokens?: number; outputTokens?: number; totalTokens?: number }>).then(usage => {
+      clearTimeout(timeoutId);
+      const inputTokens = usage.inputTokens ?? 0;
+      const outputTokens = usage.outputTokens ?? 0;
+      const duration = Date.now() - startTime;
+      costTracker.addTokens(inputTokens, outputTokens);
+      logger.info(
+        `[LLM] [run:${ctx.runId}] [id:${identifier}] ✅ Stream complete: duration=${duration}ms, tokens=${inputTokens + outputTokens}`
+      );
+      return { inputTokens, outputTokens };
+    }).catch((err) => {
+      clearTimeout(timeoutId);
+      throw err;
+    });
+
+    // Extract cost from providerMetadata independently (e.g. OpenRouter exposes cost there).
+    // Runs asynchronously from usage tracking to avoid adding microtask ticks to usage resolution.
+    const estimatedCostPromise: Promise<number> = (
+      // deno-lint-ignore no-explicit-any
+      (rawResult as any).providerMetadata as Promise<Record<string, Record<string, unknown>> | undefined>
+    ).then((pm) => {
+      const openrouterUsage = pm?.openrouter?.usage as { cost?: number } | undefined;
+      const cost = openrouterUsage?.cost ?? (pm?.openrouter?.cost as number) ?? 0;
+      costTracker.addCost(cost);
+      return cost;
+    }).catch(() => {
+      costTracker.addCost(0);
+      return 0;
+    });
+
+    const stepsPromise: Promise<unknown[]> = rawResult.steps
+      ? Promise.resolve(rawResult.steps)
+      : Promise.resolve([]);
+
+    const newMessagesPromise: Promise<ModelMessage[]> = stepsPromise.then(steps =>
+      // deno-lint-ignore no-explicit-any
+      buildNewMessagesFromSteps(steps as any[])
+    );
+
+    const toolCallsPromise: Promise<Array<{ toolCallId: string; toolName: string; args: unknown }>> = rawResult.toolCalls
+      ? Promise.resolve(rawResult.toolCalls)
+      : Promise.resolve([]);
+
+    const toolResultsPromise: Promise<Array<{ toolCallId: string; toolName: string; args: unknown; result: unknown }>> = rawResult.toolResults
+      ? Promise.resolve(rawResult.toolResults)
+      : Promise.resolve([]);
+
+    return {
+      textStream: rawResult.textStream as AsyncIterable<string>,
+      // deno-lint-ignore no-explicit-any
+      fullStream: rawResult.fullStream as AsyncIterable<any>,
+      text: rawResult.text as Promise<string>,
+      output: Promise.resolve(null),
+      toolCalls: toolCallsPromise,
+      toolResults: toolResultsPromise,
+      newMessages: newMessagesPromise,
+      steps: stepsPromise,
+      usage: usagePromise,
+      estimatedCost: estimatedCostPromise,
+    };
+  }
+
+  // ── Structured output: buffered retry loop ────────────────────────────────────
+  logger.debug(
+    `[LLM] [run:${ctx.runId}] [id:${identifier}] 🚀 Stream (structured) request: model=${maskedUri}`
+  );
+
+  // Run the buffered retry loop as an async promise
+  const workPromise: Promise<StructuredWorkResult<T>> = (async () => {
+    const allMessages = [...messages];
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const controller = new AbortController();
+      const attemptTimeoutId = setTimeout(() => {
+        try {
+          controller.abort();
+        } catch (error) {
+          logger.warn(`[LLM] Error during structured stream abort(): ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }, timeoutMs);
+
+      const rawResult = engine.streamText({
+        model: modelInstance,
+        output: Output.object({ schema: zodSchema(schema) }),
+        messages: allMessages,
+        tools,
+        toolChoice: settings?.toolChoice,
+        stopWhen: maxSteps ? stepCountIs(maxSteps) : undefined,
+        abortSignal: controller.signal,
+        ...settings,
+      } as Record<string, unknown>);
+
+      // Consume stream internally to get text and structured output
+      let text = "";
+      let output: T | null = null;
+      let validationErrorMsg = "The structured output is invalid or does not match the required schema. Please fix it.";
+
+      try {
+        text = await (rawResult.text as Promise<string>);
+        clearTimeout(attemptTimeoutId);
+        try {
+          output = await (rawResult.output as Promise<T | null>);
+        } catch (validationError: unknown) {
+          output = null;
+          validationErrorMsg = validationError instanceof Error ? validationError.message : String(validationError);
+        }
+      } catch (error: unknown) {
+        clearTimeout(attemptTimeoutId);
+        const msg = error instanceof Error ? error.message : String(error);
+        logger.debug(`[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] Stream error: ${msg}`);
+        if (attempt >= MAX_RETRIES) {
+          throw new Error(`Streaming structured output failed after ${MAX_RETRIES} attempts: ${msg}`);
+        }
+        allMessages.push({ role: "assistant", content: text || "" });
+        allMessages.push({ role: "user", content: msg });
+        const delay = calculateRetryDelay({ attempt });
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+
+      if (output !== null && output !== undefined) {
+        // Validation passed — track cost and return
+        const usageRaw = await (rawResult.usage as Promise<{ inputTokens?: number; outputTokens?: number }>);
+        const inputTokens = usageRaw.inputTokens ?? 0;
+        const outputTokens = usageRaw.outputTokens ?? 0;
+        const duration = Date.now() - startTime;
+
+        // Extract cost from provider metadata if available (e.g. OpenRouter)
+        // deno-lint-ignore no-explicit-any
+        const providerMetadata = await (((rawResult as any).providerMetadata as Promise<Record<string, Record<string, unknown>> | undefined> | undefined)?.catch(() => undefined) ?? Promise.resolve(undefined));
+        const openrouterUsage = providerMetadata?.openrouter?.usage as { cost?: number } | undefined;
+        const cost = openrouterUsage?.cost ?? (providerMetadata?.openrouter?.cost as number) ?? 0;
+
+        costTracker.addCost(cost);
+        costTracker.addTokens(inputTokens, outputTokens);
+        logger.info(
+          `[LLM] [run:${ctx.runId}] [id:${identifier}] ✅ Stream (structured) complete: attempt=${attempt}, duration=${duration}ms, cost=$${cost.toFixed(6)}, tokens=${inputTokens + outputTokens}`
+        );
+
+        // deno-lint-ignore no-explicit-any
+        const steps: any[] = rawResult.steps ? await Promise.resolve(rawResult.steps) : [];
+        // deno-lint-ignore no-explicit-any
+        const toolCalls: any[] = rawResult.toolCalls ? await Promise.resolve(rawResult.toolCalls) : [];
+        // deno-lint-ignore no-explicit-any
+        const toolResults: any[] = rawResult.toolResults ? await Promise.resolve(rawResult.toolResults) : [];
+
+        return {
+          textBuffer: [text],
+          output,
+          usage: { inputTokens, outputTokens },
+          cost,
+          steps,
+          toolCalls,
+          toolResults,
+        };
+      }
+
+      // Validation failed — send actual validation error to LLM for self-correction
+      logger.debug(
+        `[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] Structured output validation failed, retrying... Error: ${validationErrorMsg}`
+      );
+      allMessages.push({ role: "assistant", content: text || "" });
+      allMessages.push({ role: "user", content: validationErrorMsg });
+
+      if (attempt < MAX_RETRIES) {
+        const delay = calculateRetryDelay({ attempt });
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+
+    throw new Error(`Streaming structured output failed: validation did not pass after ${MAX_RETRIES} attempts`);
+  })();
+
+  // Return StreamResult with lazy async iterables backed by workPromise
+  async function* makeTextStream(): AsyncIterable<string> {
+    const result = await workPromise;
+    for (const chunk of result.textBuffer) yield chunk;
+  }
+
+  async function* makeFullStream(): AsyncIterable<unknown> {
+    const result = await workPromise;
+    for (const chunk of result.textBuffer) {
+      yield { type: "text-delta", textDelta: chunk };
+    }
+    yield { type: "finish", finishReason: "stop", usage: result.usage };
+  }
+
+  return {
+    textStream: makeTextStream(),
+    fullStream: makeFullStream(),
+    text: workPromise.then(r => r.textBuffer.join("")),
+    output: workPromise.then(r => r.output),
+    toolCalls: workPromise.then(r => r.toolCalls),
+    toolResults: workPromise.then(r => r.toolResults),
+    newMessages: workPromise.then(r => {
+      const msgs = buildNewMessagesFromSteps(r.steps);
+      // Fallback: if steps didn't produce messages but we have text, ensure the
+      // response appears in conversation history (common for structured output).
+      if (msgs.length === 0) {
+        const text = r.textBuffer.join("");
+        if (text) {
+          msgs.push({ role: "assistant", content: text } as ModelMessage);
+        }
+      }
+      return msgs;
+    }),
+    steps: workPromise.then(r => r.steps),
+    usage: workPromise.then(r => r.usage),
+    estimatedCost: workPromise.then(r => r.cost),
+  };
+}
+
+/**
  * Internal helper for generating JSON with logging and error handling.
  *
  * Supports self-correction on Zod validation errors, including those from
@@ -520,33 +912,7 @@ async function tryGenerateJson<T>(
         );
 
         // Aggregate all messages from steps
-        const newMessages: ModelMessage[] = [];
-        if (result.steps) {
-          for (const step of result.steps) {
-            if (step.text || (step.toolCalls && step.toolCalls.length > 0)) {
-              newMessages.push({
-                role: "assistant",
-                content: step.toolCalls && step.toolCalls.length > 0 
-                  ? (step.text ? [{ type: 'text', text: step.text }, ...step.toolCalls.map((tc: unknown) => ({ type: 'tool-call', ...(tc as Record<string, unknown>) }))] : step.toolCalls.map((tc: unknown) => ({ type: 'tool-call', ...(tc as Record<string, unknown>) })))
-                  : step.text
-              } as ModelMessage);
-            }
-            if (step.toolResults && step.toolResults.length > 0) {
-              for (const tr of step.toolResults) {
-                const toolResult = tr as Record<string, unknown>;
-                newMessages.push({
-                  role: "tool",
-                  content: [{
-                    type: 'tool-result',
-                    toolCallId: toolResult.toolCallId,
-                    toolName: toolResult.toolName,
-                    result: toolResult.result ?? null,
-                  }]
-                } as unknown as ModelMessage);
-              }
-            }
-          }
-        }
+        const newMessages: ModelMessage[] = buildNewMessagesFromSteps(result.steps ?? []);
 
         return {
           result: (result.output as T) ?? null,
@@ -761,5 +1127,37 @@ export function createLlmRequester(params: LlmRequesterParams): LlmRequester {
   };
 
   requester.engine = defaultLlmEngine;
+
+  // Attach the streaming method
+  requester.stream = <T>(
+    { messages: inputMessages, identifier, schema, tools, maxSteps, stageName, settings }: Readonly<{
+      messages: ModelMessage[];
+      identifier: string;
+      schema: z.ZodType<T> | undefined;
+      tools: Record<string, Tool> | undefined;
+      maxSteps: number | undefined;
+      stageName: string;
+      settings: LlmSettings | undefined;
+    }>
+  ): StreamResult<T> => {
+    const mergedSettings = { ...defaultSettings, ...settings };
+
+    return tryStreamText<T>({
+      identifier,
+      schema,
+      tools,
+      maxSteps,
+      messages: inputMessages,
+      ctx,
+      modelInstance,
+      maskedUri,
+      costTracker,
+      logger,
+      settings: mergedSettings,
+      engine: requester.engine || defaultLlmEngine,
+      _stageName: stageName,
+    });
+  };
+
   return requester as LlmRequester;
 }

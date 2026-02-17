@@ -118,6 +118,19 @@ Example: `chat://openrouter/openai/gpt-4o`, `chat://openrouter/meta-llama/llama-
 - Provides results in `GenerateResult` including `text`, `toolCalls`, `toolResults`, `newMessages`, and `steps`
 - Supports multi-step execution via `maxSteps` (using `stepCountIs` stop condition)
 
+**Streaming**:
+
+- `LlmRequester.stream` property provides a `LlmStreamer` function for real-time streaming
+- Returns `StreamResult<T>` with:
+  - `textStream`: `AsyncIterable<string>` — chunks as they arrive
+  - `fullStream`: `AsyncIterable<unknown>` — all stream parts (text-delta, tool-call, finish, etc.)
+  - Promise-based final values: `text`, `output`, `toolCalls`, `toolResults`, `newMessages`, `steps`, `usage`, `estimatedCost`
+- Two modes:
+  - **Text-only** (no `schema`): direct streaming, chunks yielded in real time
+  - **Structured** (with `schema`): buffered retry loop — stream is consumed internally, validated, and replayed on success; consumer sees only the successful attempt
+- CostTracker updated via `usage` promise resolution when stream completes
+- Max 3 retry attempts for structured output (same as non-streaming path)
+
 ### Agent Module (`src/agent/`)
 
 **Purpose**: Stateful runner for multi-turn conversations with tool integration and history management.
@@ -130,6 +143,8 @@ Example: `chat://openrouter/openai/gpt-4o`, `chat://openrouter/meta-llama/llama-
 - **API**:
     - `run(input)`: Full turn execution returning `GenerateResult`
     - `chat(input)`: Convenient text-only wrapper around `run()`
+    - `streamRun(input)`: Streaming execution returning `Promise<StreamResult<unknown>>`
+    - `streamChat(input)`: Async generator yielding text chunks; history updated after completion
 - **Tool Integration**: Aggregates tools from multiple sources:
     - **Local Tools**: Direct injection of `Tool` objects via constructor
     - **MCP Integration**: Connects to multiple MCP servers and automatically aggregates tools
@@ -409,7 +424,7 @@ export interface GenerateResult<T> {
   readonly rawResponse?: string;
 }
 
-export type LlmRequester = <T>(params: {
+export type LlmRequester = (<T>(params: {
   messages: ModelMessage[];
   identifier: string;
   schema: z.ZodType<T> | undefined;
@@ -417,7 +432,12 @@ export type LlmRequester = <T>(params: {
   maxSteps: number | undefined;
   stageName: string;
   settings: LlmSettings | undefined;
-}) => Promise<GenerateResult<T>>;
+}) => Promise<GenerateResult<T>>) & {
+  /** Exposes the underlying LlmEngine for testing/mocking. */
+  engine?: LlmEngine;
+  /** Streaming counterpart — returns StreamResult instead of awaiting full generation. */
+  stream: LlmStreamer;
+};
 ```
 
 ### Export Strategy

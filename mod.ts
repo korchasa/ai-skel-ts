@@ -18,6 +18,8 @@ export {
   type LlmRequesterParams,
   type LlmSettings,
   type GenerateResult,
+  type StreamResult,
+  type LlmStreamer,
 } from "./src/llm/llm.ts";
 
 // OpenRouter Native SDK Module

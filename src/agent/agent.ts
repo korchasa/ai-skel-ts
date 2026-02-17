@@ -6,7 +6,7 @@
  */
 
 import type { ModelMessage, Tool } from "ai";
-import type { LlmRequester, GenerateResult } from "../llm/llm.ts";
+import type { LlmRequester, GenerateResult, StreamResult } from "../llm/llm.ts";
 import type { McpClientWrapper } from "../mcp/client.ts";
 import type { RunContext } from "../run-context/run-context.ts";
 import type { HistoryCompactor } from "../llm-session-compactor/compactor.ts";
@@ -127,6 +127,98 @@ export class Agent {
   async chat(input: string): Promise<string> {
     const response = await this.run(input);
     return response.text ?? "";
+  }
+
+  /**
+   * Sends a message to the agent and returns a StreamResult for real-time streaming.
+   *
+   * The consumer MUST either consume the `textStream` fully OR await `newMessages`
+   * (or any other final promise) before making the next call — this ensures history
+   * is updated correctly.
+   *
+   * **Error behavior**: Unlike `run()`, which throws synchronously on `validationError`,
+   * `streamRun()` does not perform an upfront validation check. If the stream fails
+   * mid-way, the user message already added to history will remain (dangling). For
+   * guaranteed history consistency on errors, prefer `streamChat()` which wraps the
+   * stream iteration in `try/finally`.
+   *
+   * @param input - The user message to process.
+   * @returns A StreamResult with async iterables and promise-based final values.
+   *
+   * @example
+   * ```ts
+   * const stream = await agent.streamRun("Tell me about Tokyo");
+   * for await (const part of stream.fullStream) {
+   *   if (part.type === "text-delta") process.stdout.write(part.textDelta);
+   * }
+   * const usage = await stream.usage;
+   * ```
+   */
+  async streamRun(input: string): Promise<StreamResult<unknown>> {
+    this.ctx.logger.debug(`[Agent] User (stream): ${input}`);
+
+    // 1. Add user message
+    this.messages.push({ role: "user", content: input });
+
+    // 2. Compact history if needed
+    if (this.compactor) {
+      this.ctx.logger.debug(`[Agent] Compacting history before streaming...`);
+      this.messages = [...(await this.compactor.compact(this.messages))];
+    }
+
+    // 3. Call LLM streamer
+    this.ctx.logger.debug(
+      `[Agent] Streaming with ${this.messages.length} messages and ${Object.keys(this.tools).length} tools`
+    );
+
+    const rawStream = this.llm.stream({
+      messages: [...this.messages],
+      tools: this.tools,
+      maxSteps: 10,
+      identifier: `agent-stream-${Date.now()}`,
+      stageName: "agent-stream",
+      schema: undefined,
+      settings: undefined,
+    });
+
+    // 4. Wrap newMessages to also update agent history when resolved
+    const wrappedNewMessages = rawStream.newMessages.then((msgs) => {
+      if (msgs.length > 0) {
+        this.messages.push(...msgs);
+      }
+      return msgs;
+    });
+
+    return { ...rawStream, newMessages: wrappedNewMessages };
+  }
+
+  /**
+   * Sends a message to the agent and yields text chunks as they arrive.
+   *
+   * History is updated after the stream completes (i.e., after the generator is fully consumed).
+   * If an error occurs during streaming, `newMessages` is still awaited in a `finally` block
+   * to prevent dangling user messages in the conversation history.
+   *
+   * @param input - The user message to process.
+   * @yields Text chunks as they arrive from the LLM.
+   *
+   * @example
+   * ```ts
+   * for await (const chunk of agent.streamChat("Tell me about Tokyo")) {
+   *   process.stdout.write(chunk);
+   * }
+   * ```
+   */
+  async *streamChat(input: string): AsyncGenerator<string> {
+    const stream = await this.streamRun(input);
+    try {
+      for await (const chunk of stream.textStream) {
+        yield chunk;
+      }
+    } finally {
+      // Ensure history is updated even if streaming throws or is abandoned mid-way
+      await stream.newMessages;
+    }
   }
 
   /**
