@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.28](https://github.com/korchasa/ai-skel-ts/compare/v0.7.27...v0.7.28) (2026-02-07)
+
+
+### Features
+
+* export ZodError, ZodType, and ZodIssue from mod.ts ([8fe5f18](https://github.com/korchasa/ai-skel-ts/commit/8fe5f18cfcfcb3c1e674a25c4331af8310236fb9))
+
+
+### Documentation
+
+* add JSR-compatible module and symbol documentation ([09cd4ce](https://github.com/korchasa/ai-skel-ts/commit/09cd4ce62d887b3f42eb94e61064069c7ef4a13e))
+
 ### [0.7.27](https://github.com/korchasa/ai-skel-ts/compare/v0.7.26...v0.7.27) (2026-02-07)
 
 
