@@ -1,422 +1,245 @@
 # AI Skeleton Tools
 
-TypeScript library for content fetching and LLM interactions with robust error handling and cost tracking.
+TypeScript foundation for AI agents and LLM workflows with structured logging, cost tracking, stateful chat, and content fetchers.
 
-## Requirements
+Current version: `0.7.27`.
 
-- **Node.js**: `>=20.0.0` (for Node.js usage and local development)
+## Runtime
 
-## Installation (Private GitHub Package)
+- Deno `2.x`
+- API keys for providers you use (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, etc.)
 
-This package is hosted on GitHub Packages. To install it, you need to configure authentication.
+## Installation
 
-1.  **Generate a Personal Access Token (PAT)**:
-    *   Go to GitHub Settings -> Developer settings -> Personal access tokens.
-    *   Create a classic token with `read:packages` scope.
-
-2.  **Configure `.npmrc`**:
-    Create a `.npmrc` file in your project root with the following content:
-
-    ```ini
-    @korchasa:registry=https://npm.pkg.github.com
-    //npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
-    ```
-
-    Replace `${GITHUB_TOKEN}` with your token, or better yet, set the `GITHUB_TOKEN` environment variable.
-
-3.  **Install**:
-
-    ```bash
-    npm install @korchasa/ai-skel-ts
-    ```
-
-## Deno Reference Implementation
-
-The most robust way to use this library in Deno 2.x projects is through native environment management and a minimal automation script.
-
-### 1. Transparent Authentication Setup
-
-Instead of manual token management, use Deno's native support for `.npmrc` interpolation.
-
-**`.npmrc` (Static, safe to commit)**:
-```ini
-@korchasa:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${NPM_TOKEN}
-```
-
-### 2. Project Automation (`run.ts`)
-
-Use the `--env-file` flag in the shebang. This makes variables from `.env` available globally to Deno **before** it resolves dependencies.
-
-**`run.ts` (Shebang)**:
-```typescript
-#!/usr/bin/env -S deno run --allow-all --env-file
-```
-
-### 3. Minimal Alias (`run`)
-
-A simple bash wrapper serves as a convenient alias, completely decoupled from the application logic.
-
-**`run` (Bash)**:
 ```bash
-#!/bin/bash
-exec ./run.ts "$@"
+deno add jsr:@korchasa/ai-skel-ts
 ```
 
-### 4. Benefits of this approach
+## Core Capabilities
 
-- **Zero-knowledge Application**: The app uses `Deno.env.get()` and knows nothing about the `.env` file.
-- **Inheritance**: All child processes (app, tests, linters) automatically inherit the environment.
-- **CI/CD Compatibility**: In CI (e.g., GitHub Actions), where `.env` is absent but variables are in the environment, the `--env-file` flag is ignored and everything still works.
-- **Security**: No temporary files with secrets; tokens are only in memory.
+- Provider-agnostic LLM requester via `ModelURI` (`chat://provider/model`)
+- Structured output with Zod validation and retry-based self-correction
+- Stateful `Agent` with optional local tools and MCP tools
+- Conversation compaction (`SimpleHistoryCompactor`, `SummarizingHistoryCompactor`)
+- Local HTML content extraction (`fetch`, `fetchFromURL`)
+- Jina reader/search client (`JinaScraper`)
+- Brave web search client (`BraveSearchClient`)
+- Per-run debug artifacts through `RunContext`
+- Global token/cost accounting through `CostTracker`
 
-### 5. `deno.json` configuration
+## Quick Start
 
-```json
-{
-  "vendor": true,
-  "nodeModulesDir": "auto",
-  "imports": {
-    "@korchasa/ai-skel-ts": "npm:@korchasa/ai-skel-ts@^0.2.10",
-    "@korchasa/ai-skel-ts/logger": "npm:@korchasa/ai-skel-ts@^0.2.10/logger"
-  }
-}
+### LLM Requester
+
+```ts
+import {
+  CostTracker,
+  Logger,
+  ModelURI,
+  createLlmRequester,
+  createRunContext,
+  z,
+} from "@korchasa/ai-skel-ts";
+
+const logger = new Logger({ context: "readme", logLevel: "info" });
+const ctx = createRunContext({ logger, debugDir: "./tmp/debug/readme" });
+
+const llm = createLlmRequester({
+  modelUri: ModelURI.parse("chat://openrouter/meta-llama/llama-3-8b-instruct"),
+  logger,
+  costTracker: CostTracker.getInstance(),
+  ctx,
+});
+
+const result = await llm({
+  messages: [{ role: "user", content: "Return JSON with field message" }],
+  identifier: "quick-start",
+  schema: z.object({ message: z.string() }),
+  tools: undefined,
+  maxSteps: undefined,
+  stageName: "readme-demo",
+  settings: { timeout: 30_000 },
+});
+
+console.log(result.result?.message);
 ```
 
-### CI/CD Setup
+### Stateful Agent
 
-For CI/CD (e.g., GitHub Actions), ensure your workflow has permission to read packages or provide a `GITHUB_TOKEN` secret.
+```ts
+import {
+  Agent,
+  SimpleHistoryCompactor,
+} from "@korchasa/ai-skel-ts";
+
+const compactor = new SimpleHistoryCompactor({ maxSymbols: 12_000 });
+
+const agent = new Agent({
+  llm,
+  mcpClients: undefined,
+  ctx,
+  systemPrompt: "You are a helpful assistant.",
+  compactor,
+  tools: undefined,
+});
+
+await agent.init();
+const reply = await agent.chat("Summarize the main idea of this library.");
+console.log(reply);
+```
+
+### Local Content Fetching
+
+```ts
+import { fetchFromURL } from "@korchasa/ai-skel-ts";
+
+const page = await fetchFromURL({
+  url: "https://example.com",
+  options: {
+    ctx,
+    contentLimit: 10_000,
+  },
+});
+
+console.log(page.title, page.textLength);
+```
+
+### Jina Fetcher
+
+```ts
+import { JinaScraper } from "@korchasa/ai-skel-ts";
+
+const jina = new JinaScraper(ctx, {
+  apiKey: Deno.env.get("JINA_API_KEY"),
+});
+
+const jinaResult = await jina.fetch("https://example.com");
+console.log(jinaResult.text);
+```
+
+### Brave Search
+
+```ts
+import { BraveSearchClient } from "@korchasa/ai-skel-ts";
+
+const brave = new BraveSearchClient(ctx, {
+  apiKey: Deno.env.get("BRAVE_API_KEY"),
+});
+
+const search = await brave.search({ q: "TypeScript agent architecture", count: 3 });
+console.log(search.web?.results.length ?? 0);
+```
+
+## Model URI
+
+`ModelURI.parse()` supports:
+
+- `chat://provider/model` (default interaction mode)
+- `response-api://provider/model` (Response API mode)
+
+Examples:
+
+- `chat://openai/gpt-4o`
+- `chat://anthropic/claude-3-5-sonnet-latest`
+- `chat://gemini/gemini-2.5-pro`
+- `chat://openrouter/qwen/qwen2.5-coder-7b-instruct`
+
+URI query parameters map to call settings and provider options.
+
+## Environment Variables
+
+### LLM Providers
+
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `GEMINI_API_KEY`
+- `OPENROUTER_API_KEY`
+
+### Fetchers
+
+- `JINA_API_KEY`
+- `BRAVE_API_KEY`
+
+### Tests
+
+- `ACCEPTANCE_TEST_MODEL` (default: `chat://openrouter/meta-llama/llama-3-8b-instruct`)
+- `SKIP_ACCEPTANCE_TESTS=true` to skip provider acceptance tests
+
+## Public API
+
+Root export (`@korchasa/ai-skel-ts`) includes:
+
+- `createLlmRequester`, `ModelURI`
+- `Agent`
+- `fetch`, `fetchFromURL`
+- `JinaScraper`
+- `BraveSearchClient`
+- `CostTracker`
+- `Logger`, `createContextFromLevelString`, `log`
+- `SimpleHistoryCompactor`, `SummarizingHistoryCompactor`
+- `createRunContext`, `getSubDebugDir`
+- Re-exported types: `ModelMessage`, `Tool`, `z`, `ZodError`
+
+Subpath exports are available:
+
+- `@korchasa/ai-skel-ts/llm`
+- `@korchasa/ai-skel-ts/agent`
+- `@korchasa/ai-skel-ts/fetch-content`
+- `@korchasa/ai-skel-ts/jina-scraper`
+- `@korchasa/ai-skel-ts/brave-fetcher`
+- `@korchasa/ai-skel-ts/cost-tracker`
+- `@korchasa/ai-skel-ts/logger`
+- `@korchasa/ai-skel-ts/llm-session-compactor`
+- `@korchasa/ai-skel-ts/run-context`
 
 ## Development
 
 ```bash
-npm ci
-./run check
+deno task lint
+deno task test
+deno task check
+deno task release
 ```
-
-## Troubleshooting
-
-- If you see an `npm update check failed` warning during scripts, this repo disables npm's update notifier via `.npmrc`.
-
-## AI Context & Usage Rules
-
-This library is optimized for AI-assisted development. To help Cursor (or other agents) understand the library's patterns, this README serves as the primary context.
-
-### 🤖 For Cursor / AI Agents
-**System Instruction:** If you are an AI assistant (like Cursor, Copilot, etc.), please read the sections below and apply them to your code generation logic.
-
-### 📐 Architecture Context
-
-#### Core Philosophy
-`ai-skel-ts` is a "skeleton" for building AI agents. It prioritizes:
-1.  **Observability**: Every LLM call is logged to a YAML file in a debug directory.
-2.  **Cost Awareness**: Every token is counted via `CostTracker`.
-3.  **Robustness**: The LLM requester handles retries, timeouts, and JSON schema validation self-correction automatically.
-
-#### Main Components
-
-**1. RunContext (`src/run-context/`)**
-The "spine" of any operation. It carries `logger`, `debugDir`, and `runId`.
-Always create a context at the entry point:
-```typescript
-const ctx = createRunContext({ logger: console, debugDir: "./tmp/debug" });
-```
-
-**2. LlmRequester (`src/llm/`)**
-A wrapper around Vercel AI SDK.
-- **ModelURI**: `chat://provider/model?param=value`
-- **Self-Correction**: Automatically feeds schema validation errors back for correction.
-- **Unified Logging**: Saves input/output to `debugDir`.
-
-**3. Fetchers (`src/fetchers/`)**
-- **Local Fetcher** (`fetchFromURL`): Fast, cheap, uses `readability`.
-- **Jina Fetcher** (`JinaScraper`): Better for complex JS-heavy sites.
-
-**4. Compactor (`src/llm-session-compactor/`)**
-Manages context window size via `SummarizingHistoryCompactor`.
-
-**5. Agent (`src/agent/`)**
-A high-level orchestrator that combines LLM, Tools (both local and via MCP), and Session Management into a stateful conversational interface.
-
-### 🛠 Usage Rules (Cursor Rules)
-
-When writing code that uses `@korchasa/ai-skel-ts`, follow these guidelines:
-
-1.  **Initialization Sequence**: `CostTracker` -> `Logger`/`RunContext` -> `LlmRequester`.
-2.  **LLM Interaction**: Prefer `createLlmRequester`. Always provide a meaningful `identifier`. Use Zod schemas for structured output.
-3.  **Model URIs**: Use `chat://provider/model-name` format.
-4.  **Content Fetching**: Default to `fetchFromURL`.
-5.  **Logging**: Use `ctx.logger` instead of `console`. Check `ctx.debugDir` for artifacts.
-6.  **Error Handling**: Check `result.result` (success) or `result.validationError` (failure).
-
-#### Anti-Patterns to Avoid
-- ❌ Don't use `process.env` directly in business logic.
-- ❌ Don't implement manual retry loops for LLM calls.
-- ❌ Don't use `console.log` for debugging.
-
-## Usage
-
-### Basic LLM Usage
-
-```typescript
-import { createLlmRequester, createRunContext, CostTracker, ModelURI } from "@korchasa/ai-skel-ts";
-
-const costTracker = CostTracker.getInstance();
-const ctx = createRunContext({
-  logger: console,
-  debugDir: "./debug"
-});
-
-const requester = createLlmRequester({
-  modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=your-api-key"),
-  logger: console,
-  costTracker,
-  ctx
-});
-
-const result = await requester({
-  prompt: "Hello, how are you?",
-  identifier: "greeting",
-  schema: z.object({ response: z.string() })
-});
-```
-
-### Content Fetching
-
-```typescript
-import { fetchFromURL } from "@korchasa/ai-skel-ts";
-
-const result = await fetchFromURL({
-  url: "https://example.com/article",
-  options: { contentLimit: 10000, ctx }
-});
-
-console.log(result.title, result.text);
-```
-
-### Jina Scraper
-
-```typescript
-import { JinaScraper } from "@korchasa/ai-skel-ts";
-
-const client = new JinaScraper(ctx);
-const result = await client.fetch("https://example.com/article");
-console.log(result.text);
-```
-
-### Session Compaction
-
-```typescript
-import { SummarizingHistoryCompactor } from "@korchasa/ai-skel-ts";
-
-const compactor = new SummarizingHistoryCompactor({
-  maxSymbols: 10000,
-  summaryTokenThreshold: 1000,
-  summaryGenerator: mySummaryGenerator
-});
-
-const compacted = await compactor.compact(messages);
-```
-
-### Agent (Beta)
-
-The `Agent` class orchestrates LLM interactions, tool usage (via MCP), and session management.
-
-```typescript
-import { Agent, createLlmRequester, ModelURI } from "@korchasa/ai-skel-ts";
-
-// 1. Setup dependencies
-const llm = createLlmRequester({
-  modelUri: ModelURI.parse("chat://openai/gpt-4"),
-  logger: console,
-  costTracker,
-  ctx
-});
-
-// 2. Create Agent
-const agent = new Agent({
-  llm,
-  ctx,
-  systemPrompt: "You are a helpful assistant.",
-  // Optional: Add local tools
-  tools: {
-    "get_time": {
-      description: "Get current time",
-      parameters: z.object({}),
-      execute: async () => ({ time: new Date().toISOString() })
-    }
-  },
-  // Optional: Add MCP clients for tools
-  // mcpClients: [weatherClient] 
-});
-
-// 3. Initialize (connects to MCP servers)
-await agent.init();
-
-// 4. Chat (Legacy/Simple)
-const response = await agent.chat("What is the weather in Paris?");
-console.log(response);
-
-// 5. Run (Modern/Detailed)
-const result = await agent.run("What is the weather in London?");
-console.log(`Answer: ${result.text}`);
-console.log(`Cost: $${result.estimatedCost}`);
-console.log(`Steps: ${result.steps.length}`);
-```
-
-## API Reference
-
-### LLM Module
-
-- `createLlmRequester(params)` - Creates an LLM requester function
-- `type LlmRequester` - Type for LLM requester function
-- `type GenerateJsonResult<T>` - Result type for JSON generation
-
-### Content Fetching (Local)
-
-- `fetch(params)` - Extract plain text and HTML content from HTML
-- `fetchFromURL(params)` - Fetch and extract content from URL
-- `type FetchContentResult` - Content extraction result
-- `type FetchOptions` - Options for content extraction
-
-### Jina Scraper
-
-- `JinaScraper` - Client for Jina AI Search and Reader APIs
-- `client.fetch(url)` - Fetch normalized content
-- `client.search(query)` - Search and get normalized content results
-- `client.searchRaw(options)` - Raw search with Jina envelope
-- `client.scrapeUrlToResponse(options)` - Raw URL scraping
-- `client.scrapeIndexToResponse(options)` - Raw advanced scraping
-
-### Cost Tracking
-
-- `CostTracker.getInstance()` - Get singleton cost tracker
-- `type CostReport` - Cost report structure
-
-### Logging
-
-- `Logger` - Structured logger class
-- `log(meta)` - Simple logging function
-
-### Session Management
-
-- `SimpleHistoryCompactor` - Basic message compaction
-- `SummarizingHistoryCompactor` - LLM-powered compaction with summarization
-- `type HistoryCompactor` - Compactor interface
-
-### Utilities
-
-- `type RunContext` - Execution context
-- `createRunContext({ logger, debugDir, runId? })` - Run context factory
-- `getSubDebugDir(ctx, stageDir)` - Get debug subdirectory
-
-## Supported LLM Providers
-
-- OpenAI (`chat://openai/model-name`)
-- Anthropic (`chat://anthropic/model-name`)
-- Gemini (`chat://gemini/model-name`)
-- OpenRouter (`chat://openrouter/model-name`)
-
-## Model URI Parameters
-
-The `modelUri` supports standard and provider-specific parameters via query string:
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `apiKey` | string | API key for the provider (overrides environment variables) |
-| `baseURL` | string | Custom base URL for API requests |
-| `timeout` | number | Request timeout in milliseconds (default: 30000) |
-| `logVercelWarnings` | boolean | Set to `false` to suppress Vercel AI SDK compatibility warnings |
-| `temperature` | number | Sampling temperature (0.0 to 2.0) |
-| `maxTokens` | number | Maximum tokens to generate |
-| `topP` | number | Nucleus sampling probability |
-| `topK` | number | Top-K sampling |
-| `seed` | number | Random seed for reproducibility |
-| `maxRetries` | number | Maximum retries at the SDK level |
-| `stop` | string | Stop sequences (comma-separated for multiple values) |
-| `frequencyPenalty` | number | Frequency penalty |
-| `presencePenalty` | number | Presence penalty |
-
-**Example URI:**
-`chat://openrouter/google/gemini-2.5-flash-lite?logVercelWarnings=false&temperature=0.7&timeout=60000`
 
 ## Testing
 
-### Running Tests
+Run all tests:
 
 ```bash
-# Run all tests (unit, integration, e2e)
-npm test
-
-# Run specific test file
-npm test -- src/llm/llm.test.ts
-
-# Run checks (lint + test + build)
-npm run check
+deno task test
 ```
 
-### Acceptance Tests
-
-The project includes acceptance tests that verify the LLM module contract with real API providers. These tests require API keys to be set as environment variables.
-
-#### Local Development
-
-Create a `.env` file in the project root:
-
-```env
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-```
-
-**Note:** The project uses `dotenv` to load environment variables from `.env` file in acceptance tests.
-
-Then run the acceptance tests:
+Run one test file:
 
 ```bash
-npm test -- src/llm/llm.acceptance.test.ts
+deno test -A src/llm/llm.test.ts
 ```
 
-If you want to skip acceptance tests locally (they require API keys), set:
-
-```env
-SKIP_ACCEPTANCE_TESTS=true
-```
-
-Or run with environment variable:
+Run acceptance tests (requires `OPENROUTER_API_KEY` unless skipped):
 
 ```bash
-SKIP_ACCEPTANCE_TESTS=true npm test
+deno test -A src/llm/llm.acceptance.test.ts
 ```
 
-#### CI/CD Setup
+## CI/CD
 
-In GitHub Actions, set the `OPENROUTER_API_KEY` secret to enable acceptance tests in the CI pipeline. Without the secret, acceptance tests will be skipped automatically.
+GitHub Actions pipeline (`.github/workflows/ci.yml`) does the following:
 
-### Test Coverage
+1. Runs `deno task check` on pushes and pull requests.
+2. Creates release commits and tags on `main` when releasable commits exist.
+3. Publishes to JSR.
+4. Creates GitHub Release notes from tags.
 
-- **Unit Tests**: Component logic and isolated functionality
-- **Integration Tests**: Provider interfaces and mock interactions
-- **E2E Tests**: Full content processing pipelines
-- **Acceptance Tests**: Real API contract verification with OpenRouter
+## AI Context and Usage Rules
 
-## Features
+This repository is optimized for AI-assisted development.
 
-- **Robust Error Handling**: Automatic retries with exponential backoff
-- **Cost Tracking**: Monitor token usage and costs across providers
-- **Content Extraction**: Extract clean content from web pages
-- **Session Management**: Compress conversation history to fit context windows
-- **Type Safety**: Full TypeScript support with Zod validation
-- **Debug Logging**: Detailed YAML logs for troubleshooting
-
-## Recent Changes
-
-### [0.7.3] - 2026-01-13
-- **feat(agent):** support local tools injection via constructor
-
-### [0.7.2] - 2026-01-11
-- **docs:** remove AI_CONTEXT.md and update references in README and design documents
-
-### [0.7.1] - 2026-01-11
-- **ai:** add unified context and usage rules for cursor agents
+- Build `RunContext` first and pass it through all core modules.
+- Prefer `createLlmRequester` over direct provider SDK usage.
+- Use structured schemas (`z.object(...)`) for predictable output.
+- Keep debug artifacts enabled (`ctx.debugDir`) for traceability.
+- Use `CostTracker` to track cumulative token/cost usage.
+- Prefer `Agent.run()` when you need full tool-step and message details.
 
 ## License
 
