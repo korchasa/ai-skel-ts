@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.7.29](https://github.com/korchasa/ai-skel-ts/compare/v0.7.28...v0.7.29) (2026-02-17)
+
+
+### Features
+
+* **llm,agent:** add real-time streaming support ([8cba758](https://github.com/korchasa/ai-skel-ts/commit/8cba7582a382904bebd5e9d9d3c59a2627513f18))
+* **openrouter:** add native OpenRouter SDK module ([3b16ead](https://github.com/korchasa/ai-skel-ts/commit/3b16eadb3900bf09f4e18a7260710b9357231852))
+
+
+### Documentation
+
+* rewrite README for JSR, quick start, and current API ([2bf1039](https://github.com/korchasa/ai-skel-ts/commit/2bf103995197062ecdbbed18f2142eab1f373fae))
+
+
+### Tests
+
+* **llm:** update existing tests for LlmEngine interface changes ([14d72b9](https://github.com/korchasa/ai-skel-ts/commit/14d72b9343e4b1e5481e21a3c8a2954f2d3cc185))
+
 ### [0.7.28](https://github.com/korchasa/ai-skel-ts/compare/v0.7.27...v0.7.28) (2026-02-07)
 
 
