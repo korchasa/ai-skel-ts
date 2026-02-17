@@ -11,3 +11,4 @@ node_modules/**/[A-Z]*
 # 3. AND NOW selectively allow what we need
 !node_modules/**/*.ts
 !node_modules/**/*.d.ts
+!node_modules/**/*.md
