@@ -20,6 +20,15 @@ export {
   type GenerateResult,
 } from "./src/llm/llm.ts";
 
+// OpenRouter Native SDK Module
+export {
+  createOpenRouterRequester,
+  convertToOrMessages,
+  convertToOrTools,
+  type OpenRouterEngine,
+  type OpenRouterRequesterParams,
+} from "./src/openrouter/openrouter.ts";
+
 // Agent Module
 export {
   Agent,

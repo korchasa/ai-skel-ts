@@ -5,6 +5,7 @@
   "exports": {
     ".": "./mod.ts",
     "./llm": "./src/llm/llm.ts",
+    "./openrouter": "./src/openrouter/openrouter.ts",
     "./agent": "./src/agent/agent.ts",
     "./fetch-content": "./src/fetchers/local-fetcher/fetch-content.ts",
     "./jina-scraper": "./src/fetchers/jina-fetcher/jina-scraper.ts",
@@ -21,6 +22,7 @@
     "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@^1.26.0",
     "@mozilla/readability": "npm:@mozilla/readability@^0.6.0",
     "@openrouter/ai-sdk-provider": "npm:@openrouter/ai-sdk-provider@^6.0.0-alpha.1",
+    "@openrouter/sdk": "npm:@openrouter/sdk@0.8.0",
     "ai": "npm:ai@~6.0.27",
     "cheerio": "npm:cheerio@^1.1.2",
     "js-yaml": "npm:js-yaml@^4.1.1",

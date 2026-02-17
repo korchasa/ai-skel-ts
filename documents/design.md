@@ -5,6 +5,7 @@
 ```mermaid
 graph TD
     A[mod.ts] --> B[LLM Module]
+    A --> NR[OpenRouter Native Module]
     A --> C[Fetchers]
     A --> D[Cost Tracker]
     A --> E[Logger]
@@ -16,7 +17,11 @@ graph TD
     B --> I[Vercel AI SDK]
     B --> J[Zod Validation]
 
+    NR --> OR[@openrouter/sdk]
+    NR --> J
+
     S --> B
+    S --> NR
     S --> T[MCP Client]
     S --> F
 
@@ -35,6 +40,32 @@ graph TD
 ```
 
 ## Core Modules
+
+### OpenRouter Native Module (`src/openrouter/`)
+
+**Purpose**: Direct OpenRouter API integration using `@openrouter/sdk@0.8.0`, bypassing the Vercel AI SDK abstraction layer while producing the same `GenerateResult<T>` interface.
+
+**Key Components**:
+
+- `createOpenRouterRequester()`: Factory returning `LlmRequester`-compatible function
+- `convertToOrMessages()`: Converts Vercel AI SDK `ModelMessage[]` → OpenRouter `Message[]` (supports v6 `input`/`output` and legacy v5 `args`/`result` formats)
+- `convertToOrTools()`: Converts Vercel AI SDK `Record<string, Tool>` → OpenRouter `ToolDefinitionJson[]`
+- `OpenRouterEngine`: Interface for HTTP transport (enables mocking in tests)
+
+**Features**:
+
+- Structured output via Zod v3 schema → JSON Schema → `response_format: json_schema`
+- Tool calling with automatic execution and multi-step loop (up to `maxSteps`)
+- Retry logic (3 attempts) with self-correction on JSON parse / Zod validation failures
+- CostTracker, Logger, RunContext integration
+- Backward compatible with messages from `createLlmRequester`
+
+**URI format**: `chat://openrouter/<provider>/<model>?apiKey=...`
+Example: `chat://openrouter/openai/gpt-4o`, `chat://openrouter/meta-llama/llama-3.1-8b-instruct`
+
+**Environment variable**: `OPENROUTER_API_KEY`
+
+---
 
 ### LLM Module (`src/llm/`)
 
