@@ -52,7 +52,6 @@ export const defaultLlmEngine: LlmEngine = {
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 
 /**
  * Result of a generation request to an LLM.
@@ -445,20 +444,11 @@ function createModelInstance({ parsed }: Readonly<{ parsed: ParsedModelUri }>): 
       const gemini = createGoogleGenerativeAI({ apiKey });
       return gemini(modelName);
     }
-    case "openrouter": {
-      const openrouter = createOpenRouter({
-        apiKey,
-        headers: {
-          "HTTP-Referer": "https://github.com/korchasa/ai-skel-ts",
-          "X-Title": "AI Skeleton TS",
-        }
-      });
-      return openrouter.chat(modelName, {
-        usage: {
-          include: true,
-        },
-      });
-    }
+    case "openrouter":
+      throw new Error(
+        `OpenRouter is not supported via createLlmRequester(). ` +
+        `Use createOpenRouterRequester() from "@korchasa/ai-skel-ts/openrouter" instead.`,
+      );
     default:
       throw new Error(`Unknown LLM provider: ${provider}`);
   }
