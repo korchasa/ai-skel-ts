@@ -150,3 +150,48 @@ Deno.test({
     await Deno.remove(ctx.debugDir, { recursive: true });
   },
 });
+
+Deno.test({
+  name: "OpenRouter Acceptance: streaming text generation",
+  ignore: !OPENROUTER_API_KEY,
+  async fn() {
+    const logger = createContextFromLevelString({ context: "acceptance", level: "warn" });
+    const costTracker = CostTracker.getInstance();
+    const ctx = createRunContext({
+      debugDir: await Deno.makeTempDir({ prefix: "or-acceptance-stream-" }),
+      logger,
+    });
+
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse(TEST_MODEL),
+      logger,
+      costTracker,
+      ctx,
+    });
+
+    const streamResult = requester.stream({
+      messages: [{ role: "user", content: "Say exactly: hello" }],
+      identifier: "acceptance-stream",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "acceptance",
+      settings: { maxOutputTokens: 20 },
+    });
+
+    const chunks: string[] = [];
+    for await (const chunk of streamResult.textStream) {
+      chunks.push(chunk);
+    }
+
+    const fullText = await streamResult.text;
+    expect(fullText.toLowerCase()).toContain("hello");
+    expect(chunks.length).toBeGreaterThan(0);
+
+    const usage = await streamResult.usage;
+    expect(usage.inputTokens).toBeGreaterThan(0);
+    expect(usage.outputTokens).toBeGreaterThan(0);
+
+    await Deno.remove(ctx.debugDir, { recursive: true });
+  },
+});

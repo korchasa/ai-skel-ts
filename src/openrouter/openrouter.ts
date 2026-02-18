@@ -3,7 +3,7 @@
  *
  * Provides `createOpenRouterRequester()` that uses the official `@openrouter/sdk`
  * instead of the Vercel AI SDK abstraction layer, while producing the same
- * `GenerateResult<T>` interface for drop-in compatibility with `Agent`.
+ * `GenerateResult<T>` / `StreamResult<T>` interfaces for drop-in compatibility with `Agent`.
  *
  * @module
  */
@@ -16,6 +16,12 @@ import type {
   ToolDefinitionJson,
 } from "@openrouter/sdk/models";
 import type { SendChatCompletionRequestRequest } from "@openrouter/sdk/models/operations";
+import type {
+  OpenResponsesNonStreamingResponse,
+  OpenResponsesRequest,
+  OpenResponsesStreamEvent,
+} from "@openrouter/sdk/models";
+import { fromChatMessages } from "@openrouter/sdk";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { z } from "zod";
 import { dump as yamlDump } from "js-yaml";
@@ -28,6 +34,8 @@ import type {
   LlmRequester,
   LlmRequesterParams,
   LlmSettings,
+  LlmStreamer,
+  StreamResult,
 } from "../llm/llm.ts";
 import { ModelURI } from "../llm/llm.ts";
 
@@ -37,9 +45,16 @@ import { ModelURI } from "../llm/llm.ts";
 
 /**
  * Interface for the underlying HTTP transport to allow mocking in tests.
+ *
+ * `chatSend` handles non-streaming requests (existing behaviour).
+ * `streamSend` handles streaming requests and returns an async iterable of SSE events.
+ * `streamSend` is optional — it only needs to be provided when streaming is used.
  */
 export interface OpenRouterEngine {
   chatSend(params: ChatGenerationParams): Promise<ChatResponse>;
+  /** Returns an async iterable of OpenResponses SSE events. Typed as `unknown` to allow easy mocking. */
+  // deno-lint-ignore no-explicit-any
+  streamSend?: (request: OpenResponsesRequest & { stream: true }) => Promise<AsyncIterable<any>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +250,25 @@ export function convertToOrTools(tools: Record<string, Tool>): ToolDefinitionJso
   });
 }
 
+/**
+ * Converts Vercel AI SDK `Record<string, Tool>` to OpenResponses API tool format
+ * (plain JSON schema, no Zod). Used for streaming requests via `beta.responses.send()`.
+ */
+function convertToOrRequestTools(
+  tools: Record<string, Tool>,
+): Array<{ type: "function"; name: string; description?: string; strict?: boolean; parameters: Record<string, unknown> | null }> {
+  return Object.entries(tools).map(([name, tool]) => {
+    const toolRecord = tool as unknown as Record<string, unknown>;
+    const schema = extractJsonSchema(toolRecord.inputSchema ?? toolRecord.parameters);
+    return {
+      type: "function" as const,
+      name,
+      ...(toolRecord.description ? { description: toolRecord.description as string } : {}),
+      parameters: schema,
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tool execution helper
 // ---------------------------------------------------------------------------
@@ -291,6 +325,272 @@ async function executeToolCalls(
 }
 
 // ---------------------------------------------------------------------------
+// Streaming helper — processes SSE events from beta.responses.send()
+// ---------------------------------------------------------------------------
+
+/**
+ * Processes an async iterable of `OpenResponsesStreamEvent` into component streams
+ * and promises suitable for `StreamResult<T>`.
+ *
+ * The function returns a `StreamResult<T>` immediately. Internally it fans out a
+ * single shared async iterable into the required async iterables and promises by
+ * consuming the event source once via a broadcast approach (one consumer with
+ * value-sharing via resolved Promises).
+ */
+function buildStreamResult<T>(
+  params: Readonly<{
+    messages: ModelMessage[];
+    identifier: string;
+    schema: z.ZodType<T> | undefined;
+    tools: Record<string, Tool> | undefined;
+    maxSteps: number | undefined;
+    // deno-lint-ignore no-explicit-any
+    eventSource: () => Promise<AsyncIterable<any>>;
+    logger: Logger;
+    ctx: RunContext;
+    costTracker: { addCost(c: number): void; addTokens(i: number, o: number): void };
+  }>
+): StreamResult<T> {
+  const { messages, schema, tools, maxSteps, eventSource, logger, ctx, costTracker, identifier } = params;
+
+  // Shared state resolved after stream consumption
+  let resolveText!: (v: string) => void;
+  let resolveOutput!: (v: T | null) => void;
+  let resolveToolCalls!: (v: Array<{ toolCallId: string; toolName: string; args: unknown }>) => void;
+  let resolveToolResults!: (v: Array<{ toolCallId: string; toolName: string; args: unknown; result: unknown }>) => void;
+  let resolveNewMessages!: (v: ModelMessage[]) => void;
+  let resolveSteps!: (v: unknown[]) => void;
+  let resolveUsage!: (v: { inputTokens: number; outputTokens: number }) => void;
+  let resolveCost!: (v: number) => void;
+
+  const textPromise = new Promise<string>((r) => { resolveText = r; });
+  const outputPromise = new Promise<T | null>((r) => { resolveOutput = r; });
+  const toolCallsPromise = new Promise<Array<{ toolCallId: string; toolName: string; args: unknown }>>((r) => { resolveToolCalls = r; });
+  const toolResultsPromise = new Promise<Array<{ toolCallId: string; toolName: string; args: unknown; result: unknown }>>((r) => { resolveToolResults = r; });
+  const newMessagesPromise = new Promise<ModelMessage[]>((r) => { resolveNewMessages = r; });
+  const stepsPromise = new Promise<unknown[]>((r) => { resolveSteps = r; });
+  const usagePromise = new Promise<{ inputTokens: number; outputTokens: number }>((r) => { resolveUsage = r; });
+  const costPromise = new Promise<number>((r) => { resolveCost = r; });
+
+  // Text chunks pushed into an async generator via a shared queue
+  const chunkQueue: string[] = [];
+  let chunkDone = false;
+  let chunkResolve: (() => void) | null = null;
+
+  function pushChunk(chunk: string): void {
+    chunkQueue.push(chunk);
+    if (chunkResolve) {
+      const r = chunkResolve;
+      chunkResolve = null;
+      r();
+    }
+  }
+
+  function finishChunks(): void {
+    chunkDone = true;
+    if (chunkResolve) {
+      const r = chunkResolve;
+      chunkResolve = null;
+      r();
+    }
+  }
+
+  async function* textStreamGen(): AsyncIterable<string> {
+    let idx = 0;
+    while (true) {
+      if (idx < chunkQueue.length) {
+        yield chunkQueue[idx++];
+      } else if (chunkDone) {
+        break;
+      } else {
+        await new Promise<void>((r) => { chunkResolve = r; });
+      }
+    }
+  }
+
+  // Run the stream processing in the background
+  (async () => {
+    const allToolCallsAcc: Array<{ toolCallId: string; toolName: string; args: unknown }> = [];
+    const allToolResultsAcc: Array<{ toolCallId: string; toolName: string; args: unknown; result: unknown }> = [];
+    const newMessagesAcc: ModelMessage[] = [];
+
+    let currentMessages = [...messages];
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCost = 0;
+    let fullText = "";
+
+    const maxStepsUsed = maxSteps ?? (tools ? 5 : 1);
+
+    try {
+      for (let step = 0; step < maxStepsUsed; step++) {
+        const eventIterable = await eventSource();
+
+        // Collect SSE events for this step
+        let stepText = "";
+        let completedResponse: OpenResponsesNonStreamingResponse | null = null;
+        const stepFunctionCalls: Array<{ callId: string; name: string; arguments: string }> = [];
+
+        for await (const event of eventIterable) {
+          const ev = event as Record<string, unknown>;
+          const evType = ev.type as string;
+
+          if (evType === "response.output_text.delta") {
+            const delta = ev.delta as string;
+            stepText += delta;
+            // Only push chunks if no schema (structured output is replayed after validation)
+            if (!schema) {
+              pushChunk(delta);
+            }
+          } else if (evType === "response.output_item.done") {
+            const item = ev.item as Record<string, unknown>;
+            if (item?.type === "function_call") {
+              stepFunctionCalls.push({
+                callId: (item.callId ?? item.id) as string,
+                name: item.name as string,
+                arguments: item.arguments as string,
+              });
+            }
+          } else if (evType === "response.completed") {
+            completedResponse = (ev.response as OpenResponsesNonStreamingResponse);
+          }
+        }
+
+        // Accumulate usage from the completed response
+        if (completedResponse?.usage) {
+          totalInputTokens += completedResponse.usage.inputTokens ?? 0;
+          totalOutputTokens += completedResponse.usage.outputTokens ?? 0;
+          totalCost += completedResponse.usage.cost ?? 0;
+        }
+
+        // If there are tool calls in this step, execute them and continue
+        if (stepFunctionCalls.length > 0 && tools) {
+          // Add assistant message with tool calls
+          newMessagesAcc.push({
+            role: "assistant",
+            content: [
+              ...(stepText ? [{ type: "text" as const, text: stepText }] : []),
+              ...stepFunctionCalls.map((tc) => ({
+                type: "tool-call" as const,
+                toolCallId: tc.callId,
+                toolName: tc.name,
+                input: (() => {
+                  try { return JSON.parse(tc.arguments); } catch { return {}; }
+                })(),
+              })),
+            ],
+          } as unknown as ModelMessage);
+
+          // Execute tools
+          const execResults = await executeToolCalls(
+            stepFunctionCalls.map((tc) => ({
+              id: tc.callId,
+              type: "function",
+              function: { name: tc.name, arguments: tc.arguments },
+            })),
+            tools,
+            currentMessages,
+          );
+
+          for (const r of execResults) {
+            allToolCallsAcc.push({ toolCallId: r.toolCallId, toolName: r.toolName, args: r.args });
+            allToolResultsAcc.push(r);
+          }
+
+          // Add tool results to newMessages
+          for (const r of execResults) {
+            newMessagesAcc.push({
+              role: "tool",
+              content: [{
+                type: "tool-result",
+                toolCallId: r.toolCallId,
+                toolName: r.toolName,
+                result: r.result,
+              }],
+            } as unknown as ModelMessage);
+          }
+
+          // Prepare next iteration
+          currentMessages = [...currentMessages, ...newMessagesAcc.slice(newMessagesAcc.length - execResults.length - 1)];
+          continue;
+        }
+
+        // No tool calls — this is the final text response
+        fullText += stepText;
+
+        // For structured output: push the full text as one chunk after validation
+        if (schema) {
+          let parsedOutput: T | null = null;
+          try {
+            const parsed = JSON.parse(fullText);
+            const zodResult = schema.safeParse(parsed);
+            if (zodResult.success) {
+              parsedOutput = zodResult.data;
+              pushChunk(fullText);
+            } else {
+              logger.warn(`[OpenRouter] [run:${ctx.runId}] [id:${identifier}] ⚠️ Stream validation failed: ${zodResult.error.message}`);
+              pushChunk(fullText); // push anyway as best-effort
+            }
+          } catch {
+            pushChunk(fullText);
+          }
+          resolveOutput(parsedOutput);
+        } else {
+          resolveOutput(null);
+        }
+
+        newMessagesAcc.push({ role: "assistant", content: fullText });
+        break;
+      }
+
+      logger.info(
+        `[OpenRouter] [run:${ctx.runId}] [id:${identifier}] ✅ Stream complete: cost=$${totalCost.toFixed(6)}, tokens=${totalInputTokens + totalOutputTokens}`,
+      );
+
+      costTracker.addCost(totalCost);
+      costTracker.addTokens(totalInputTokens, totalOutputTokens);
+
+      resolveText(fullText);
+      resolveToolCalls(allToolCallsAcc.length > 0 ? allToolCallsAcc : []);
+      resolveToolResults(allToolResultsAcc.length > 0 ? allToolResultsAcc : []);
+      resolveNewMessages(newMessagesAcc);
+      resolveSteps([]);
+      resolveUsage({ inputTokens: totalInputTokens, outputTokens: totalOutputTokens });
+      resolveCost(totalCost);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error(`[OpenRouter] [run:${ctx.runId}] [id:${identifier}] ❌ Stream error: ${errorMsg}`);
+
+      // Resolve all promises with safe defaults so consumers don't hang
+      resolveText(fullText);
+      resolveOutput(null);
+      resolveToolCalls([]);
+      resolveToolResults([]);
+      resolveNewMessages(newMessagesAcc);
+      resolveSteps([]);
+      resolveUsage({ inputTokens: totalInputTokens, outputTokens: totalOutputTokens });
+      resolveCost(totalCost);
+    } finally {
+      finishChunks();
+    }
+  })();
+
+  return {
+    textStream: textStreamGen(),
+    // deno-lint-ignore no-explicit-any
+    fullStream: (async function* () { /* not implemented */ })() as any,
+    text: textPromise,
+    output: outputPromise,
+    toolCalls: toolCallsPromise,
+    toolResults: toolResultsPromise,
+    newMessages: newMessagesPromise,
+    steps: stepsPromise,
+    usage: usagePromise,
+    estimatedCost: costPromise,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Logging helpers
 // ---------------------------------------------------------------------------
 
@@ -317,6 +617,9 @@ function sanitizeForYaml(obj: unknown, visited = new WeakSet()): unknown {
  * Creates an `LlmRequester`-compatible function that uses the official
  * `@openrouter/sdk` for direct OpenRouter API access, bypassing Vercel AI SDK.
  *
+ * The returned function has a `.stream` property implementing `LlmStreamer`
+ * for real-time SSE streaming via the OpenResponses API.
+ *
  * @example
  * ```ts
  * const requester = createOpenRouterRequester({
@@ -325,6 +628,13 @@ function sanitizeForYaml(obj: unknown, visited = new WeakSet()): unknown {
  *   costTracker,
  *   ctx,
  * });
+ *
+ * // Non-streaming
+ * const result = await requester({ messages, identifier, schema, tools, maxSteps, stageName, settings });
+ *
+ * // Streaming
+ * const stream = requester.stream({ messages, identifier, schema, tools, maxSteps, stageName, settings });
+ * for await (const chunk of stream.textStream) { process.stdout.write(chunk); }
  * ```
  */
 export function createOpenRouterRequester(
@@ -344,13 +654,26 @@ export function createOpenRouterRequester(
         apiKey,
         ...(baseURL ? { serverURL: baseURL } : {}),
       });
-      // The SDK wraps ChatGenerationParams inside { chatGenerationParams: ... }
       const req: SendChatCompletionRequestRequest & { chatGenerationParams: { stream?: false } } = {
         chatGenerationParams: { ...reqParams, stream: false as const },
       };
       return client.chat.send(req);
     },
+    streamSend: async (request: OpenResponsesRequest & { stream: true }): Promise<AsyncIterable<OpenResponsesStreamEvent>> => {
+      const client = new OpenRouter({
+        apiKey,
+        ...(baseURL ? { serverURL: baseURL } : {}),
+      });
+      // The Deno-cached version of betaResponsesSend.js expects { openResponsesRequest: ... } wrapper
+      // deno-lint-ignore no-explicit-any
+      const eventStream = await (client.beta.responses as any).send({ openResponsesRequest: request });
+      return eventStream as AsyncIterable<OpenResponsesStreamEvent>;
+    },
   };
+
+  // ---------------------------------------------------------------------------
+  // Non-streaming requester (existing implementation)
+  // ---------------------------------------------------------------------------
 
   const requester = async <T>(
     reqParams: Readonly<{
@@ -715,6 +1038,72 @@ export function createOpenRouterRequester(
       rawResponse: lastRawResponse,
     };
   };
+
+  // ---------------------------------------------------------------------------
+  // Streaming requester
+  // ---------------------------------------------------------------------------
+
+  const streamer: LlmStreamer = <T>(
+    reqParams: Readonly<{
+      messages: ModelMessage[];
+      identifier: string;
+      schema: z.ZodType<T> | undefined;
+      tools: Record<string, Tool> | undefined;
+      maxSteps: number | undefined;
+      stageName: string;
+      settings: LlmSettings | undefined;
+    }>,
+  ): StreamResult<T> => {
+    const { messages, identifier, schema, tools, maxSteps, settings } = reqParams;
+
+    return buildStreamResult<T>({
+      messages,
+      identifier,
+      schema,
+      tools,
+      maxSteps,
+      eventSource: () => {
+        const orMessages = convertToOrMessages(messages);
+        // deno-lint-ignore no-explicit-any
+        const orInput = fromChatMessages(orMessages as any);
+        const orReqTools = tools ? convertToOrRequestTools(tools) : undefined;
+
+        const request: OpenResponsesRequest & { stream: true } = {
+          model: modelName,
+          input: orInput,
+          stream: true as const,
+          ...(orReqTools && orReqTools.length > 0 ? { tools: orReqTools } : {}),
+          ...(schema
+            ? {
+                text: {
+                  format: {
+                    type: "json_schema" as const,
+                    name: "response",
+                    schema: zodToJsonSchema(schema) as Record<string, unknown>,
+                    strict: true,
+                  },
+                },
+              }
+            : {}),
+          ...(settings?.temperature !== undefined ? { temperature: settings.temperature } : {}),
+          ...(settings?.maxOutputTokens !== undefined ? { maxOutputTokens: settings.maxOutputTokens } : {}),
+          ...(settings?.topP !== undefined ? { topP: settings.topP } : {}),
+          ...(settings?.frequencyPenalty !== undefined ? { frequencyPenalty: settings.frequencyPenalty } : {}),
+          ...(settings?.presencePenalty !== undefined ? { presencePenalty: settings.presencePenalty } : {}),
+        };
+
+        if (!engine.streamSend) {
+          return Promise.reject(new Error("[OpenRouter] streamSend is not implemented in this engine. Use a real engine or provide a mock with streamSend."));
+        }
+        return engine.streamSend(request);
+      },
+      logger,
+      ctx,
+      costTracker,
+    });
+  };
+
+  (requester as unknown as { stream: LlmStreamer }).stream = streamer;
 
   return requester as LlmRequester;
 }

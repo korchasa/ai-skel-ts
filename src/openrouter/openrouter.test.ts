@@ -7,6 +7,8 @@ import { expect } from "@std/expect";
 import { z } from "zod";
 import { jsonSchema, type ModelMessage, type Tool } from "ai";
 
+import type { OpenResponsesStreamEvent } from "@openrouter/sdk/models";
+
 import {
   convertToOrMessages,
   convertToOrTools,
@@ -332,6 +334,17 @@ Deno.test("createOpenRouterRequester - factory", async (t) => {
     };
     const requester = createOpenRouterRequester(params);
     expect(typeof requester).toBe("function");
+  });
+
+  await t.step("has .stream property that is a function", () => {
+    const params: OpenRouterRequesterParams = {
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+    };
+    const requester = createOpenRouterRequester(params);
+    expect(typeof requester.stream).toBe("function");
   });
 });
 
@@ -660,5 +673,301 @@ Deno.test("createOpenRouterRequester - tool calling", async (t) => {
     expect(result.toolCalls![0].toolName).toBe("calc");
     expect(result.toolResults).toHaveLength(1);
     expect(result.toolResults![0].result).toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createOpenRouterRequester - streaming (.stream)
+// ---------------------------------------------------------------------------
+
+/** Builds a mock async iterable of SSE stream events for text-only streaming. */
+function makeMockStreamEvents(textChunks: string[], usage?: { inputTokens: number; outputTokens: number; cost?: number }): AsyncIterable<OpenResponsesStreamEvent> {
+  // deno-lint-ignore no-explicit-any
+  const events: any[] = [];
+
+  for (const delta of textChunks) {
+    events.push({
+      type: "response.output_text.delta",
+      delta,
+      outputIndex: 0,
+      itemId: "item-1",
+      contentIndex: 0,
+      sequenceNumber: events.length,
+      logprobs: [],
+    });
+  }
+
+  // response.completed carries usage
+  events.push({
+    type: "response.completed",
+    sequenceNumber: events.length,
+    response: {
+      id: "resp-1",
+      object: "response",
+      createdAt: Date.now(),
+      model: "openai/gpt-4o",
+      status: "completed",
+      completedAt: Date.now(),
+      output: [
+        {
+          type: "message",
+          id: "item-1",
+          status: "completed",
+          role: "assistant",
+          content: [{ type: "output_text", text: textChunks.join(""), annotations: [] }],
+        },
+      ],
+      error: null,
+      incompleteDetails: null,
+      usage: usage ? {
+        inputTokens: usage.inputTokens,
+        inputTokensDetails: { cachedTokens: 0 },
+        outputTokens: usage.outputTokens,
+        outputTokensDetails: { reasoningTokens: 0 },
+        totalTokens: usage.inputTokens + usage.outputTokens,
+        cost: usage.cost ?? 0,
+      } : null,
+      temperature: null,
+      topP: null,
+      presencePenalty: null,
+      frequencyPenalty: null,
+      metadata: null,
+      tools: [],
+      toolChoice: "auto",
+      parallelToolCalls: true,
+    },
+  });
+
+  async function* asyncIter() {
+    for (const event of events) {
+      yield event;
+    }
+  }
+
+  return asyncIter();
+}
+
+Deno.test("createOpenRouterRequester - streaming", async (t) => {
+  const logger = makeLogger();
+  const costTracker = makeCostTracker();
+  const ctx = makeCtx();
+
+  await t.step("stream returns StreamResult with textStream", () => {
+    const engine: OpenRouterEngine = {
+      chatSend: () => makeChatResponse("fallback"),
+      streamSend: () => Promise.resolve(makeMockStreamEvents(["Hello", " world"])),
+    };
+
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+
+    const streamResult = requester.stream({
+      messages: [{ role: "user", content: "Hi" }],
+      identifier: "test-stream-1",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: undefined,
+    });
+
+    expect(streamResult).toBeDefined();
+    expect(typeof streamResult.textStream[Symbol.asyncIterator]).toBe("function");
+  });
+
+  await t.step("stream yields text chunks from SSE events", async () => {
+    const engine: OpenRouterEngine = {
+      chatSend: () => makeChatResponse("fallback"),
+      streamSend: () => Promise.resolve(makeMockStreamEvents(["Hello", " world"])),
+    };
+
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+
+    const streamResult = requester.stream({
+      messages: [{ role: "user", content: "Hi" }],
+      identifier: "test-stream-2",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: undefined,
+    });
+
+    const chunks: string[] = [];
+    for await (const chunk of streamResult.textStream) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual(["Hello", " world"]);
+    expect(await streamResult.text).toBe("Hello world");
+  });
+
+  await t.step("stream resolves usage from response.completed event", async () => {
+    const engine: OpenRouterEngine = {
+      chatSend: () => makeChatResponse("fallback"),
+      streamSend: () => Promise.resolve(makeMockStreamEvents(["Done"], { inputTokens: 42, outputTokens: 17, cost: 0.001 })),
+    };
+
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+
+    const streamResult = requester.stream({
+      messages: [{ role: "user", content: "Hi" }],
+      identifier: "test-stream-usage",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: undefined,
+    });
+
+    // Consume stream first
+    for await (const _ of streamResult.textStream) { /* consume */ }
+
+    const usage = await streamResult.usage;
+    expect(usage.inputTokens).toBe(42);
+    expect(usage.outputTokens).toBe(17);
+    const cost = await streamResult.estimatedCost;
+    expect(cost).toBeCloseTo(0.001);
+  });
+
+  await t.step("stream with schema buffers and parses structured output", async () => {
+    const schema = z.object({ name: z.string(), age: z.number() });
+
+    const engine: OpenRouterEngine = {
+      chatSend: () => makeChatResponse("fallback"),
+      streamSend: () => Promise.resolve(makeMockStreamEvents(['{"name":"Alice","age":30}'])),
+    };
+
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+
+    const streamResult = requester.stream({
+      messages: [{ role: "user", content: "Give me a person" }],
+      identifier: "test-stream-schema",
+      schema,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: undefined,
+    });
+
+    for await (const _ of streamResult.textStream) { /* consume */ }
+
+    const output = await streamResult.output;
+    expect(output).toEqual({ name: "Alice", age: 30 });
+  });
+
+  await t.step("stream executes tool calls and populates toolResults", async () => {
+    // First call returns a tool call event, second returns text
+    let callCount = 0;
+
+    const engine: OpenRouterEngine = {
+      chatSend: () => makeChatResponse("fallback"),
+      streamSend: (_request) => {
+        callCount++;
+        if (callCount === 1) {
+          // Stream that ends with a function_call output item
+          // deno-lint-ignore no-explicit-any
+          return Promise.resolve((async function* (): AsyncGenerator<any> {
+            yield {
+              type: "response.output_item.done",
+              outputIndex: 0,
+              sequenceNumber: 0,
+              item: {
+                type: "function_call",
+                id: "call-1",
+                callId: "call-1",
+                name: "add",
+                arguments: '{"x":2,"y":3}',
+                status: "completed",
+              },
+            };
+            yield {
+              type: "response.completed",
+              sequenceNumber: 1,
+              response: {
+                id: "resp-1",
+                object: "response",
+                createdAt: Date.now(),
+                model: "openai/gpt-4o",
+                status: "completed",
+                completedAt: Date.now(),
+                output: [
+                  {
+                    type: "function_call",
+                    id: "call-1",
+                    callId: "call-1",
+                    name: "add",
+                    arguments: '{"x":2,"y":3}',
+                    status: "completed",
+                  },
+                ],
+                error: null,
+                incompleteDetails: null,
+                usage: { inputTokens: 10, inputTokensDetails: { cachedTokens: 0 }, outputTokens: 5, outputTokensDetails: { reasoningTokens: 0 }, totalTokens: 15, cost: 0 },
+                temperature: null, topP: null, presencePenalty: null, frequencyPenalty: null,
+                metadata: null, tools: [], toolChoice: "auto", parallelToolCalls: true,
+              },
+            };
+          })());
+        } else {
+          // After tool execution, return text
+          return Promise.resolve(makeMockStreamEvents(["The answer is 5"]));
+        }
+      },
+    };
+
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+
+    const addTool: Tool = {
+      description: "Add two numbers",
+      inputSchema: z.object({ x: z.number(), y: z.number() }),
+      execute: ({ x, y }: { x: number; y: number }) => x + y,
+    } as unknown as Tool;
+
+    const streamResult = requester.stream({
+      messages: [{ role: "user", content: "What is 2+3?" }],
+      identifier: "test-stream-tools",
+      schema: undefined,
+      tools: { add: addTool },
+      maxSteps: 5,
+      stageName: "test",
+      settings: undefined,
+    });
+
+    for await (const _ of streamResult.textStream) { /* consume */ }
+
+    const toolResults = await streamResult.toolResults;
+    expect(toolResults).toHaveLength(1);
+    expect(toolResults[0].result).toBe(5);
+    expect(await streamResult.text).toBe("The answer is 5");
   });
 });

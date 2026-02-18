@@ -54,11 +54,19 @@ graph TD
 
 **Features**:
 
-- Structured output via Zod v3 schema → JSON Schema → `response_format: json_schema`
+- Non-streaming: `chatSend()` via `client.chat.send()` (Chat Completions API)
+- Streaming: `.stream` property (`LlmStreamer`) via `client.beta.responses.send({ openResponsesRequest })` (OpenResponses SSE API, `stream: true`)
+  - Text-only: real-time SSE `response.output_text.delta` chunks forwarded to `textStream`
+  - Structured output: buffered internally, validated, replayed on success (same 3-retry pattern)
+  - Tool calling: `response.output_item.done` function_call events → execute → loop
+  - Usage/cost from `response.completed` event
+- Structured output via Zod v3 schema → JSON Schema → `response_format: json_schema` (non-streaming) / `text.format` (streaming)
 - Tool calling with automatic execution and multi-step loop (up to `maxSteps`)
 - Retry logic (3 attempts) with self-correction on JSON parse / Zod validation failures
 - CostTracker, Logger, RunContext integration
 - Backward compatible with messages from `createLlmRequester`
+
+**SDK API note**: Deno-cached `betaResponsesSend.js` requires `{ openResponsesRequest: request }` wrapper (not bare `request`) for `client.beta.responses.send()`.
 
 **URI format**: `chat://openrouter/<provider>/<model>?apiKey=...`
 Example: `chat://openrouter/openai/gpt-4o`, `chat://openrouter/meta-llama/llama-3.1-8b-instruct`
@@ -95,7 +103,7 @@ Example: `chat://openrouter/openai/gpt-4o`, `chat://openrouter/meta-llama/llama-
 | OpenAI     | @ai-sdk/openai              | `chat://openai/gpt-4`                     | `OPENAI_API_KEY`     |
 | Anthropic  | @ai-sdk/anthropic           | `chat://anthropic/claude-3`               | `ANTHROPIC_API_KEY`  |
 | Gemini     | @ai-sdk/google              | `chat://gemini/gemini-pro`                | `GEMINI_API_KEY`     |
-| OpenRouter | @openrouter/ai-sdk-provider | `chat://openrouter/meta-llama/llama-3`    | `OPENROUTER_API_KEY` |
+| OpenRouter | @openrouter/sdk (native)    | use `createOpenRouterRequester()` directly | `OPENROUTER_API_KEY` |
 
 **Supported Protocols**:
 
