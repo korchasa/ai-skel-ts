@@ -8,12 +8,12 @@ import type { SummaryGenerator } from "./summary-generator.ts";
 
 // Mock summary generator
 class MockSummaryGenerator {
-  generateSummary({ messages }: { messages: readonly ModelMessage[] }): ModelMessage {
+  generateSummary({ messages }: { messages: readonly ModelMessage[] }): Promise<ModelMessage> {
     const content = `Summary of ${messages.length} messages`;
-    return {
+    return Promise.resolve({
       role: "assistant",
       content,
-    };
+    });
   }
 }
 
@@ -152,8 +152,8 @@ Deno.test("History Compactor", async (t) => {
 
     await t.step("compact should handle summarization errors gracefully", async () => {
       class ErrorSummaryGenerator {
-        generateSummary(): ModelMessage {
-          throw new Error("Summarization failed");
+        generateSummary(): Promise<ModelMessage> {
+          return Promise.reject(new Error("Summarization failed"));
         }
       }
 

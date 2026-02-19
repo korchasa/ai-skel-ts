@@ -62,7 +62,7 @@
 ### Session Management (FR-SESSION)
 - [x] **FR-SESSION-1**: Compress message history to fit context windows
 - [x] **FR-SESSION-2**: Preserve tool-call/tool-result pairing integrity
-- [ ] **FR-SESSION-3**: Support LLM-powered summarization for history compaction
+- [x] **FR-SESSION-3**: Support LLM-powered summarization for history compaction
 - [x] **FR-SESSION-4**: Provide simple trimming as fallback option
 - [x] **FR-SESSION-5**: Estimate message weight by JSON representation length
 

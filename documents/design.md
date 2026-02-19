@@ -37,6 +37,8 @@ graph TD
     L --> Q[Jina Search API]
 
     F --> R[Summary Generator]
+    R --> B
+
 ```
 
 ## Core Modules
@@ -221,6 +223,7 @@ Example: `chat://openrouter/openai/gpt-4o`, `chat://openrouter/meta-llama/llama-
 
 - **SimpleHistoryCompactor**: Trim oldest messages by symbol count
 - **SummarizingHistoryCompactor**: LLM-powered summarization with fallback
+- **SummaryGenerator**: Uses `LlmRequester` for real LLM calls (retry, YAML debug files, cost tracking). Falls back to degraded summary on error or empty response. Config: `summaryMaxTokens` → `maxOutputTokens`, `temperature`.
 
 **Consistency Rules**:
 

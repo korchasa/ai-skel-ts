@@ -4,7 +4,8 @@
  * without losing important information.
  */
 
-import type { LanguageModel, ModelMessage } from "ai";
+import type { ModelMessage } from "ai";
+import type { LlmRequester, LlmSettings } from "../llm/llm.ts";
 import { log } from "../logger/logger.ts";
 
 /**
@@ -17,32 +18,39 @@ export interface SummaryGeneratorConfig {
   readonly temperature?: number;
 }
 
+/** System prompt sent to the LLM for conversation summarization. */
+const SUMMARIZATION_SYSTEM_PROMPT =
+  `You are a conversation summarizer. Your task is to create a concise summary of the provided conversation history. ` +
+  `Preserve key facts, decisions, and context. Omit redundant details. ` +
+  `Output only the summary text, no preamble.`;
+
 /**
  * Service for generating summaries of message history via LLM.
  * Encapsulates all LLM interaction for history compression.
+ * Uses LlmRequester for automatic retry, YAML debug files, cost tracking, and logging.
  */
 export class SummaryGenerator {
-  private readonly model: LanguageModel;
+  private readonly llm: LlmRequester;
   private readonly config: SummaryGeneratorConfig;
 
   constructor(
-    { model, config = {} }: Readonly<{
-      model: LanguageModel;
+    { llm, config = {} }: Readonly<{
+      llm: LlmRequester;
       config?: SummaryGeneratorConfig;
     }>
   ) {
-    this.model = model;
+    this.llm = llm;
     this.config = config;
   }
 
   /**
    * Generates a summary of conversation history using LLM.
-   * Preserves recent messages, summarizes older ones.
+   * Falls back to a degraded summary if the LLM call fails or returns a validation error.
    *
    * @param params - Parameters for summary generation.
    * @returns Summarized conversation as an assistant message.
    */
-  generateSummary({ messages }: Readonly<{ messages: readonly ModelMessage[] }>): ModelMessage {
+  async generateSummary({ messages }: Readonly<{ messages: readonly ModelMessage[] }>): Promise<ModelMessage> {
     log({
       mod: "summary_generator",
       event: "summary_start",
@@ -50,55 +58,83 @@ export class SummaryGenerator {
     });
 
     try {
-      // Call LLM to generate summary using simpler streaming approach
-      // Create the summary message directly with the conversation
-      const requestContent = messages
+      // Serialize messages into a readable format for the summarizer
+      const serialized = messages
         .map((msg: ModelMessage) => {
-          if (typeof msg.content === "string") {
-            return msg.content;
-          }
-          try {
-            return JSON.stringify(msg.content);
-          } catch {
-            return "[Complex content that could not be serialized]";
-          }
+          const content = typeof msg.content === "string"
+            ? msg.content
+            : (() => {
+                try {
+                  return JSON.stringify(msg.content);
+                } catch {
+                  return "[Complex content]";
+                }
+              })();
+          return `[${msg.role}]: ${content}`;
         })
-        .join("\n\n");
+        .join("\n");
 
-      const summaryContent = `Summary of the conversation (${messages.length} messages):
+      const settings: LlmSettings = {};
+      if (this.config.summaryMaxTokens !== undefined) {
+        settings.maxOutputTokens = this.config.summaryMaxTokens;
+      }
+      if (this.config.temperature !== undefined) {
+        settings.temperature = this.config.temperature;
+      }
 
-${requestContent}
+      const result = await this.llm({
+        messages: [
+          { role: "system", content: SUMMARIZATION_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: `Summarize the following conversation (${messages.length} messages):\n\n${serialized}`,
+          },
+        ],
+        identifier: "summary-generation",
+        stageName: "session-compaction",
+        schema: undefined,
+        tools: undefined,
+        maxSteps: undefined,
+        settings,
+      });
 
-This conversation has been summarized to maintain context efficiency.`;
+      // Fall back to degraded summary if LLM returned a validation error or empty text
+      if (result.validationError || !result.text) {
+        log({
+          mod: "summary_generator",
+          event: "summary_llm_error",
+          error: result.validationError ?? "empty response",
+        });
+        return this.buildFallback(messages.length);
+      }
 
       log({
         mod: "summary_generator",
         event: "summary_complete",
-        summaryLength: summaryContent.length,
-        config: this.config,
-        modelName: (this.model as Record<string, unknown>)?.name as string ||
-                   (this.model as Record<string, unknown>)?.modelName as string ||
-                   "LanguageModel",
+        summaryLength: result.text.length,
       });
 
-      return {
-        role: "assistant",
-        content: summaryContent,
-      };
+      return { role: "assistant", content: result.text };
     } catch (error) {
       log({
         mod: "summary_generator",
         event: "summary_error",
         error: error instanceof Error ? error.message : String(error),
       });
-
-      // Return a fallback summary on error
-      const fallbackContent = `Summary of conversation (${messages.length} messages): Error occurred during summarization, but conversation context is preserved.`;
-
-      return {
-        role: "assistant",
-        content: fallbackContent,
-      };
+      return this.buildFallback(messages.length);
     }
+  }
+
+  /**
+   * Builds a degraded fallback summary when LLM is unavailable.
+   *
+   * @param messageCount - Number of messages that were to be summarized.
+   * @returns A minimal assistant message indicating summarization failed.
+   */
+  private buildFallback(messageCount: number): ModelMessage {
+    return {
+      role: "assistant",
+      content: `Summary of conversation (${messageCount} messages): Error occurred during summarization, but conversation context is preserved.`,
+    };
   }
 }
