@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.8.0](https://github.com/korchasa/ai-skel-ts/compare/v0.7.29...v0.8.0) (2026-02-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* createLlmRequester() with openrouter URI now throws an error
+directing users to createOpenRouterRequester() from the native module.
+
+- Remove @openrouter/ai-sdk-provider from deno.json imports
+- Remove createOpenRouter import and openrouter case in createModelInstance()
+- Migrate llm.acceptance.test.ts to use createOpenRouterRequester() directly
+
+### Features
+
+* **openrouter:** add streaming support via .stream LlmStreamer ([f81ead5](https://github.com/korchasa/ai-skel-ts/commit/f81ead5279aded788f9e09dbba306f157e5e45df))
+* **session:** implement real LLM call in SummaryGenerator via LlmRequester ([6188d3a](https://github.com/korchasa/ai-skel-ts/commit/6188d3a576f8f159d845da2a22cad009061ac3a8))
+
+
+### build
+
+* remove @openrouter/ai-sdk-provider dependency ([636c05e](https://github.com/korchasa/ai-skel-ts/commit/636c05ef73c4934580b6850e11f2ec450e063190))
+
+
+### Documentation
+
+* **requirements:** mark implemented requirements with checkboxes ([d5702d5](https://github.com/korchasa/ai-skel-ts/commit/d5702d5c7dd95d2fac1bd00ccfa4f920604726d9))
+
+
+### Styles
+
+* fix duplicate list item prefix in AGENTS.md ([e4f6fec](https://github.com/korchasa/ai-skel-ts/commit/e4f6fec368783807dc633a32eed0236d3c094b64))
+
 ### [0.7.29](https://github.com/korchasa/ai-skel-ts/compare/v0.7.28...v0.7.29) (2026-02-17)
 
 
