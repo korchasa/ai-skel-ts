@@ -172,9 +172,11 @@ export type LlmRequester = (<T>(
 
 /**
  * Represents a parsed Model URI.
- * Syntax: protocol://provider/model?params
- * 
- * - protocol: chat | response-api
+ * Syntax: provider/model?params
+ *
+ * A protocol prefix (e.g. `chat://`, `response-api://`) is accepted for
+ * backward compatibility but is ignored — it carries no behavioral meaning.
+ *
  * - provider: openai | anthropic | gemini | openrouter | ollama
  * - model: model identifier (can contain slashes)
  * - params: URL parameters
@@ -185,13 +187,19 @@ export class ModelURI {
   /**
    * Parses a model URI into provider and model components.
    *
+   * Accepts both the short form (`provider/model`) and legacy forms with a
+   * protocol prefix (`chat://provider/model`, `response-api://provider/model`).
+   * The protocol, when present, is ignored.
+   *
    * @param uri - The model URI to parse.
    * @returns A ModelURI instance.
    * @throws Error if the URI is invalid.
    *
    * @example
    * ```ts
-   * const uri = ModelURI.parse("chat://openai/gpt-4o?temperature=0.7");
+   * const uri = ModelURI.parse("openai/gpt-4o?temperature=0.7");
+   * // Legacy form also accepted:
+   * const uri2 = ModelURI.parse("chat://openai/gpt-4o?temperature=0.7");
    * ```
    */
   static parse(uri: string): ModelURI {
@@ -248,7 +256,10 @@ export class ModelURI {
     if (maskedUrl.searchParams.has("apiKey")) {
       maskedUrl.searchParams.set("apiKey", "***");
     }
-    return decodeURIComponent(maskedUrl.toString());
+    // Return protocol-free format: provider/model?params
+    const providerAndPath = maskedUrl.host + decodeURIComponent(maskedUrl.pathname);
+    const query = maskedUrl.search;
+    return providerAndPath + query;
   }
 }
 
@@ -266,7 +277,6 @@ export interface LlmRequesterParams {
  * Parsed model URI components.
  */
 interface ParsedModelUri {
-  readonly protocol: string;
   readonly provider: string;
   readonly modelName: string;
   readonly apiKey?: string;
@@ -376,7 +386,6 @@ function buildNewMessagesFromSteps(steps: any[]): ModelMessage[] {
  */
 function parseModelUri({ uri }: Readonly<{ uri: ModelURI }>): ParsedModelUri {
   const result: ParsedModelUri = {
-    protocol: uri.protocol,
     provider: uri.provider,
     modelName: uri.modelName,
     params: {},
@@ -426,10 +435,6 @@ function parseModelUri({ uri }: Readonly<{ uri: ModelURI }>): ParsedModelUri {
  */
 function createModelInstance({ parsed }: Readonly<{ parsed: ParsedModelUri }>): LanguageModel {
   const { provider, modelName, apiKey, baseURL } = parsed;
-
-  // In the future, we can switch logic based on 'protocol' (e.g. use response-specific API)
-  // For now, most providers are supported via their standard Chat interface which supports structured outputs.
-  // If protocol === 'response-api', we might want to ensure strict mode or specific settings.
 
   switch (provider) {
     case "openai": {

@@ -9,21 +9,28 @@ Deno.test("ModelURI", async (t) => {
     const uri = ModelURI.parse("chat://openai/gpt-4");
     expect(uri.provider).toBe("openai");
     expect(uri.modelName).toBe("gpt-4");
-    expect(uri.protocol).toBe("chat");
   });
 
-  await t.step("should parse response-api://openai/gpt-4o", () => {
+  await t.step("should parse response-api://openai/gpt-4o (protocol accepted but ignored)", () => {
     const uri = ModelURI.parse("response-api://openai/gpt-4o");
     expect(uri.provider).toBe("openai");
     expect(uri.modelName).toBe("gpt-4o");
-    expect(uri.protocol).toBe("response-api");
   });
 
-  await t.step("should parse openai/gpt-4 as chat://openai/gpt-4 (default protocol)", () => {
+  await t.step("should parse openai/gpt-4 without protocol prefix", () => {
     const uri = ModelURI.parse("openai/gpt-4");
     expect(uri.provider).toBe("openai");
     expect(uri.modelName).toBe("gpt-4");
-    expect(uri.protocol).toBe("chat");
+  });
+
+  await t.step("toString() should return format without protocol prefix", () => {
+    const uri = ModelURI.parse("openai/gpt-4");
+    expect(uri.toString()).toBe("openai/gpt-4");
+  });
+
+  await t.step("toString() should return format without protocol prefix for chat:// URI", () => {
+    const uri = ModelURI.parse("chat://openai/gpt-4");
+    expect(uri.toString()).toBe("openai/gpt-4");
   });
 
   await t.step("should throw error for legacy openai:gpt-4 format", () => {
