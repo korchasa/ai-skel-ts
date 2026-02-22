@@ -3,7 +3,8 @@
 ## Functional Requirements
 
 ### LLM Integration (FR-LLM)
-- [x] **FR-LLM-1**: Support multiple providers via `ModelURI` class with unified syntax (`protocol://provider/model?params`)
+- [x] **FR-LLM-1**: Support multiple providers via `ModelURI` class with unified syntax (`provider/model?params`); protocol prefix accepted for backward compatibility but ignored
+- [x] **FR-LLM-14**: Unified `createLlmRequester()` factory in `src/llm/factory.ts` routes by provider: `openrouter` → native `@openrouter/sdk`, others → Vercel AI SDK
 - [x] **FR-LLM-2**: Implement automatic retry with exponential backoff (max 3 attempts)
 - [x] **FR-LLM-3**: Support self-correction on JSON parsing/Zod validation failures
 - [x] **FR-LLM-4**: Provide structured generation with schema validation and conversational output

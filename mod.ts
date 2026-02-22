@@ -10,9 +10,9 @@
  * @module
  */
 
-// LLM Module
+// LLM Module — factory re-exports the unified createLlmRequester (routes by provider)
+export { createLlmRequester } from "./src/llm/factory.ts";
 export {
-  createLlmRequester,
   ModelURI,
   type LlmRequester,
   type LlmRequesterParams,

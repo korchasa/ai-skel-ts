@@ -1,5 +1,6 @@
 import { Agent } from "./agent.ts";
-import { createLlmRequester, ModelURI } from "../llm/llm.ts";
+import { createLlmRequester } from "../llm/factory.ts";
+import { ModelURI } from "../llm/llm.ts";
 import { CostTracker } from "../cost-tracker/cost-tracker.ts";
 import { createRunContext } from "../run-context/run-context.ts";
 import { Logger } from "../logger/logger.ts";
@@ -19,7 +20,7 @@ async function main() {
 
   // 1. Setup LLM (using mock for demo if no API key)
   const apiKey = Deno.env.get("OPENROUTER_API_KEY") || "dummy-key";
-  const modelUri = ModelURI.parse(`chat://openrouter/meta-llama/llama-3-8b-instruct?apiKey=${apiKey}`);
+  const modelUri = ModelURI.parse(`openrouter/meta-llama/llama-3-8b-instruct?apiKey=${apiKey}`);
   
   const llm = createLlmRequester({
     modelUri,

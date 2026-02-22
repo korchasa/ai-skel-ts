@@ -70,8 +70,8 @@ graph TD
 
 **SDK API note**: Deno-cached `betaResponsesSend.js` requires `{ openResponsesRequest: request }` wrapper (not bare `request`) for `client.beta.responses.send()`.
 
-**URI format**: `chat://openrouter/<provider>/<model>?apiKey=...`
-Example: `chat://openrouter/openai/gpt-4o`, `chat://openrouter/meta-llama/llama-3.1-8b-instruct`
+**URI format**: `openrouter/<provider>/<model>?apiKey=...`
+Example: `openrouter/openai/gpt-4o`, `openrouter/meta-llama/llama-3.1-8b-instruct`
 
 **Environment variable**: `OPENROUTER_API_KEY`
 
@@ -83,12 +83,12 @@ Example: `chat://openrouter/openai/gpt-4o`, `chat://openrouter/meta-llama/llama-
 
 **Key Components**:
 
-- `createLlmRequester()`: Factory returning typed generation function
+- `createLlmRequester()`: Unified factory that routes by provider — `openrouter` → native `@openrouter/sdk`, all others → Vercel AI SDK. Defined in `src/llm/factory.ts`.
 - `ModelURI`: Class encapsulating `URL` for model identifiers
 - `LlmRequester`: Type for schema-validated or tool-enabled generation requests
 - `LlmSettings`: CallSettings + `timeout` + `toolChoice` ('auto', 'none', 'required', or specific tool)
 - URI Parser:
-  `ModelURI` class supporting `protocol://provider/model` syntax with `chat` as default protocol.
+  `ModelURI` class supporting `provider/model` syntax. A protocol prefix (`chat://`, `response-api://`) is accepted for backward compatibility but is ignored.
 - Warning Suppression: Global `AI_SDK_LOG_WARNINGS` control via `logVercelWarnings` URI parameter
 - Retry Logic: 3-attempt exponential backoff (1s, 2s, 4s)
 - Self-Correction: Retry on validation failures with error context
@@ -100,22 +100,19 @@ Example: `chat://openrouter/openai/gpt-4o`, `chat://openrouter/meta-llama/llama-
 
 **Provider Support**:
 
-| Provider   | SDK                         | URI Format                                | Environment Variable |
-| ---------- | --------------------------- | ----------------------------------------- | -------------------- |
-| OpenAI     | @ai-sdk/openai              | `chat://openai/gpt-4`                     | `OPENAI_API_KEY`     |
-| Anthropic  | @ai-sdk/anthropic           | `chat://anthropic/claude-3`               | `ANTHROPIC_API_KEY`  |
-| Gemini     | @ai-sdk/google              | `chat://gemini/gemini-pro`                | `GEMINI_API_KEY`     |
-| OpenRouter | @openrouter/sdk (native)    | use `createOpenRouterRequester()` directly | `OPENROUTER_API_KEY` |
+| Provider   | SDK                         | URI Format                          | Environment Variable |
+| ---------- | --------------------------- | ----------------------------------- | -------------------- |
+| OpenAI     | @ai-sdk/openai              | `openai/gpt-4`                      | `OPENAI_API_KEY`     |
+| Anthropic  | @ai-sdk/anthropic           | `anthropic/claude-3`                | `ANTHROPIC_API_KEY`  |
+| Gemini     | @ai-sdk/google              | `gemini/gemini-pro`                 | `GEMINI_API_KEY`     |
+| OpenRouter | @openrouter/sdk (native)    | `openrouter/openai/gpt-4o`          | `OPENROUTER_API_KEY` |
 
-**Supported Protocols**:
-
-*   `chat`: Standard Chat Completion API (default)
-*   `response-api`: Structured Output API (e.g. `response-api://openai/gpt-4o`)
+**Protocol prefix**: optional, ignored. `chat://openai/gpt-4` and `openai/gpt-4` are equivalent.
 
 **API Key Resolution**:
 
 - Priority: URI parameter > Environment variable
-- URI format: `provider://model?apiKey=key`
+- URI format: `provider/model?apiKey=key`
 - Environment variables: `<PROVIDER_UPPERCASE>_API_KEY`
 
 **Generation Logic**:

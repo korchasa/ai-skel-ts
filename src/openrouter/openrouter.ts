@@ -623,7 +623,7 @@ function sanitizeForYaml(obj: unknown, visited = new WeakSet()): unknown {
  * @example
  * ```ts
  * const requester = createOpenRouterRequester({
- *   modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o"),
+ *   modelUri: ModelURI.parse("openrouter/openai/gpt-4o"),
  *   logger,
  *   costTracker,
  *   ctx,
