@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.8.1](https://github.com/korchasa/ai-skel-ts/compare/v0.8.0...v0.8.1) (2026-02-22)
+
+
+### Features
+
+* **llm:** add unified createLlmRequester factory routing by provider (FR-LLM-14) ([bda1692](https://github.com/korchasa/ai-skel-ts/commit/bda16927327664a961115e68db361e9ab645a448))
+* **llm:** make ModelURI protocol-agnostic, toString() emits provider/model format ([8c441f4](https://github.com/korchasa/ai-skel-ts/commit/8c441f4ff4f856234e5865a530804a5dee464cd7))
+
+
+### Code Refactoring
+
+* **llm:** wire unified factory into public API and update all call sites ([71179cd](https://github.com/korchasa/ai-skel-ts/commit/71179cd5f4a45a2cdac108f4082730db891db313))
+
 ## [0.8.0](https://github.com/korchasa/ai-skel-ts/compare/v0.7.29...v0.8.0) (2026-02-22)
 
 
