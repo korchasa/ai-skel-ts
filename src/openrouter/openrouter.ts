@@ -22,8 +22,7 @@ import type {
   OpenResponsesStreamEvent,
 } from "@openrouter/sdk/models";
 import { fromChatMessages } from "@openrouter/sdk";
-import { zodToJsonSchema } from "zod-to-json-schema";
-import type { z } from "zod";
+import { type z, toJSONSchema } from "zod";
 import { dump as yamlDump } from "js-yaml";
 import type { ModelMessage, Tool } from "ai";
 import type { Logger } from "../logger/logger.ts";
@@ -118,7 +117,7 @@ function extractJsonSchema(inputSchema: unknown): Record<string, any> {
   // Zod schema: has `.safeParse` method
   if (typeof (inputSchema as z.ZodType).safeParse === "function") {
     // deno-lint-ignore no-explicit-any
-    return zodToJsonSchema(inputSchema as z.ZodType<any>) as Record<string, any>;
+    return toJSONSchema(inputSchema as z.ZodType<any>) as Record<string, any>;
   }
 
   // Vercel AI SDK `jsonSchema()` wrapper: has `jsonSchema` or `validate` property
@@ -752,7 +751,7 @@ export function createOpenRouterRequester(
                     type: "json_schema" as const,
                     jsonSchema: {
                       name: "response",
-                      schema: zodToJsonSchema(schema) as Record<string, unknown>,
+                      schema: toJSONSchema(schema) as Record<string, unknown>,
                       strict: true,
                     },
                   },
@@ -1079,7 +1078,7 @@ export function createOpenRouterRequester(
                   format: {
                     type: "json_schema" as const,
                     name: "response",
-                    schema: zodToJsonSchema(schema) as Record<string, unknown>,
+                    schema: toJSONSchema(schema) as Record<string, unknown>,
                     strict: true,
                   },
                 },
