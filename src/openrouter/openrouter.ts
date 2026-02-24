@@ -136,7 +136,7 @@ function extractJsonSchema(inputSchema: unknown): Record<string, any> {
  *
  * Handles both Vercel AI SDK v6 format (`input`/`output`) and legacy v5 format
  * (`args`/`result`) for backward compatibility with messages stored by
- * the existing `createLlmRequester`.
+ * the existing `createVercelRequester`.
  */
 export function convertToOrMessages(messages: ModelMessage[]): Message[] {
   const result: Message[] = [];

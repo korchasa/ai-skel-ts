@@ -451,8 +451,9 @@ function createModelInstance({ parsed }: Readonly<{ parsed: ParsedModelUri }>): 
     }
     case "openrouter":
       throw new Error(
-        `OpenRouter is not supported via createLlmRequester(). ` +
-        `Use createOpenRouterRequester() from "@korchasa/ai-skel-ts/openrouter" instead.`,
+        `OpenRouter is not supported via createVercelRequester(). ` +
+        `Use createLlmRequester() from "@korchasa/ai-skel-ts" (unified factory) ` +
+        `or createOpenRouterRequester() from "@korchasa/ai-skel-ts/openrouter" instead.`,
       );
     default:
       throw new Error(`Unknown LLM provider: ${provider}`);
@@ -1064,11 +1065,11 @@ async function tryGenerateJson<T>(
  *
  * @example
  * ```ts
- * const requester = createLlmRequester({ modelUri, logger, costTracker, ctx });
+ * const requester = createVercelRequester({ modelUri, logger, costTracker, ctx });
  * const result = await requester({ messages, identifier: "test", stageName: "test" });
  * ```
  */
-export function createLlmRequester(params: LlmRequesterParams): LlmRequester {
+export function createVercelRequester(params: LlmRequesterParams): LlmRequester {
   const { modelUri, logger, costTracker, ctx } = params;
   const parsed = parseModelUri({ uri: modelUri });
   const { settings: defaultSettings } = parsed;

@@ -4,7 +4,7 @@
  */
 
 import { expect } from "@std/expect";
-import { createLlmRequester, ModelURI, type LlmEngine } from "./llm.ts";
+import { createVercelRequester, ModelURI, type LlmEngine } from "./llm.ts";
 import { NoObjectGeneratedError } from "ai";
 import type { Logger } from "../logger/logger.ts";
 import type { CostTracker } from "../cost-tracker/cost-tracker.ts";
@@ -144,7 +144,7 @@ Deno.test("Non-streaming: cost tracker accumulates tokens from failed validation
     },
   };
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -207,7 +207,7 @@ Deno.test("Non-streaming: cost tracker reports zero tokens for errors without us
     },
   };
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -248,7 +248,7 @@ Deno.test("Streaming structured: cost tracker accumulates tokens from failed val
 
   let callCount = 0;
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -311,7 +311,7 @@ Deno.test("Streaming structured: cost tracker accumulates tokens when output pro
 
   let callCount = 0;
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,

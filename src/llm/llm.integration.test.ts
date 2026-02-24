@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { createLlmRequester, ModelURI } from "./llm.ts";
+import { createVercelRequester, ModelURI } from "./llm.ts";
 import type { Logger } from "../logger/logger.ts";
 import type { CostTracker } from "../cost-tracker/cost-tracker.ts";
 import type { RunContext } from "../run-context/run-context.ts";
@@ -32,7 +32,7 @@ Deno.test("LLM Integration Tests", async (t) => {
 
   await t.step("JSON generation with schema validation", async (t) => {
     await t.step("should handle successful JSON generation", () => {
-      const requester = createLlmRequester({
+      const requester = createVercelRequester({
         modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
         logger,
         costTracker,
@@ -43,7 +43,7 @@ Deno.test("LLM Integration Tests", async (t) => {
     });
 
     await t.step("should handle schema validation errors", () => {
-      const requester = createLlmRequester({
+      const requester = createVercelRequester({
         modelUri: ModelURI.parse("chat://anthropic/claude-3-sonnet-20240229?apiKey=test-key"),
         logger,
         costTracker,
@@ -63,7 +63,7 @@ Deno.test("LLM Integration Tests", async (t) => {
       ];
 
       for (const _schema of schemas) {
-        const requester = createLlmRequester({
+        const requester = createVercelRequester({
           modelUri: ModelURI.parse("chat://gemini/gemini-pro?apiKey=test-key"),
           logger,
           costTracker,
@@ -88,7 +88,7 @@ Deno.test("LLM Integration Tests", async (t) => {
 
     await t.step("should handle unknown providers", () => {
       try {
-        createLlmRequester({
+        createVercelRequester({
           modelUri: ModelURI.parse("chat://unknown/some-model?apiKey=test"),
           logger,
           costTracker,
@@ -104,7 +104,7 @@ Deno.test("LLM Integration Tests", async (t) => {
 
   await t.step("Provider-specific configurations", async (t) => {
     await t.step("should support OpenAI with various parameters", () => {
-      const requester = createLlmRequester({
+      const requester = createVercelRequester({
         modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key&temperature=0.5&maxTokens=100"),
         logger,
         costTracker,

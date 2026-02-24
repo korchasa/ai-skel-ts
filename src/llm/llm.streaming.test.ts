@@ -4,7 +4,7 @@
  */
 
 import { expect } from "@std/expect";
-import { createLlmRequester, ModelURI, type LlmEngine, type StreamResult } from "./llm.ts";
+import { createVercelRequester, ModelURI, type LlmEngine, type StreamResult } from "./llm.ts";
 import type { Logger } from "../logger/logger.ts";
 import type { CostTracker } from "../cost-tracker/cost-tracker.ts";
 import type { RunContext } from "../run-context/run-context.ts";
@@ -102,7 +102,7 @@ function makeTestDeps() {
 
 Deno.test("LLM Streaming - LlmStreamer type exists on requester", () => {
   const { logger, costTracker, ctx } = makeTestDeps();
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -115,7 +115,7 @@ Deno.test("LLM Streaming - LlmStreamer type exists on requester", () => {
 Deno.test("LLM Streaming - text-only: yields chunks in order", async () => {
   const { logger, costTracker, ctx } = makeTestDeps();
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -149,7 +149,7 @@ Deno.test("LLM Streaming - text-only: yields chunks in order", async () => {
 Deno.test("LLM Streaming - text-only: text promise resolves to full text", async () => {
   const { logger, costTracker, ctx } = makeTestDeps();
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -179,7 +179,7 @@ Deno.test("LLM Streaming - text-only: text promise resolves to full text", async
 Deno.test("LLM Streaming - text-only: usage promise resolves with token counts", async () => {
   const { logger, costTracker, ctx } = makeTestDeps();
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -234,7 +234,7 @@ Deno.test("LLM Streaming - cost tracker is updated via onFinish", async () => {
     startTime: new Date(),
   } as unknown as RunContext;
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -271,7 +271,7 @@ Deno.test("LLM Streaming - structured output: output promise resolves after vali
   const schema = z.object({ name: z.string(), age: z.number() });
   const validObject = { name: "Alice", age: 30 };
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -309,7 +309,7 @@ Deno.test("LLM Streaming - structured output retry: first attempt fails validati
 
   let callCount = 0;
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -360,7 +360,7 @@ Deno.test("LLM Streaming - structured output retry: output promise rejects (real
 
   let callCount = 0;
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -405,7 +405,7 @@ Deno.test("LLM Streaming - structured output retry: output promise rejects (real
 Deno.test("LLM Streaming - error handling: stream error propagates through textStream", async () => {
   const { logger, costTracker, ctx } = makeTestDeps();
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -491,7 +491,7 @@ Deno.test("LLM Streaming - tool calls: tryStreamText passes tools to engine and 
 
   let capturedParams: Record<string, unknown> | undefined;
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,
@@ -545,7 +545,7 @@ Deno.test("LLM Streaming - tool calls: tryStreamText passes tools to engine and 
 Deno.test("LLM Streaming - StreamResult has all required properties", () => {
   const { logger, costTracker, ctx } = makeTestDeps();
 
-  const requester = createLlmRequester({
+  const requester = createVercelRequester({
     modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
     logger,
     costTracker,

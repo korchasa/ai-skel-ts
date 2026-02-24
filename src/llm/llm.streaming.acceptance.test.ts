@@ -4,7 +4,7 @@
  */
 
 import { expect } from "@std/expect";
-import { createLlmRequester, ModelURI } from "./llm.ts";
+import { createVercelRequester, ModelURI } from "./llm.ts";
 import { Logger } from "../logger/logger.ts";
 import { CostTracker } from "../cost-tracker/cost-tracker.ts";
 import { createRunContext } from "../run-context/run-context.ts";
@@ -22,7 +22,7 @@ Deno.test({
     costTracker.reset();
     const ctx = createRunContext({ debugDir, logger });
 
-    const requester = createLlmRequester({
+    const requester = createVercelRequester({
       modelUri: ModelURI.parse("chat://openai/gpt-4o-mini"),
       logger,
       costTracker,

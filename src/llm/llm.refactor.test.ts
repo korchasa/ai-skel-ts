@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { createLlmRequester, ModelURI, type LlmEngine } from "./llm.ts";
+import { createVercelRequester, ModelURI, type LlmEngine } from "./llm.ts";
 import type { Logger } from "../logger/logger.ts";
 import type { CostTracker } from "../cost-tracker/cost-tracker.ts";
 import type { RunContext } from "../run-context/run-context.ts";
@@ -38,7 +38,7 @@ Deno.test("LLM Requester Refactoring", async (t) => {
       } as any),
     };
 
-    const requester = createLlmRequester({
+    const requester = createVercelRequester({
       modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
       logger,
       costTracker,

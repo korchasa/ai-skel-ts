@@ -15,7 +15,7 @@
  */
 
 import {
-  createLlmRequester as createVercelRequester,
+  createVercelRequester,
   type LlmRequester,
   type LlmRequesterParams,
 } from "./llm.ts";

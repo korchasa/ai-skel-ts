@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { createLlmRequester, ModelURI } from "./llm.ts";
+import { createVercelRequester, ModelURI } from "./llm.ts";
 import type { Logger } from "../logger/logger.ts";
 import type { CostTracker } from "../cost-tracker/cost-tracker.ts";
 import type { RunContext } from "../run-context/run-context.ts";
@@ -73,7 +73,7 @@ Deno.test("LLM Requester", async (t) => {
   } as unknown as RunContext;
 
   await t.step("should create requester for OpenAI", () => {
-    expect(() => createLlmRequester({
+    expect(() => createVercelRequester({
       modelUri: ModelURI.parse("chat://openai/gpt-4?apiKey=test-key"),
       logger,
       costTracker,
@@ -85,7 +85,7 @@ Deno.test("LLM Requester", async (t) => {
     await t.step("should fallback to environment variable if apiKey is missing from URI", () => {
       Deno.env.set("OPENAI_API_KEY", "env-key");
       
-      const requester = createLlmRequester({
+      const requester = createVercelRequester({
         modelUri: ModelURI.parse("chat://openai/gpt-4"),
         logger,
         costTracker,
@@ -96,7 +96,7 @@ Deno.test("LLM Requester", async (t) => {
 
     await t.step("should use provider-specific environment variable", () => {
       Deno.env.set("GEMINI_API_KEY", "gemini-env-key");
-      const requester = createLlmRequester({
+      const requester = createVercelRequester({
         modelUri: ModelURI.parse("chat://gemini/model"),
         logger,
         costTracker,
