@@ -135,7 +135,7 @@ Example: `openrouter/openai/gpt-4o`, `openrouter/meta-llama/llama-3.1-8b-instruc
 - Two modes:
   - **Text-only** (no `schema`): direct streaming, chunks yielded in real time
   - **Structured** (with `schema`): buffered retry loop — stream is consumed internally, validated, and replayed on success; consumer sees only the successful attempt
-- CostTracker updated via `usage` promise resolution when stream completes
+- CostTracker updated via `usage` promise resolution on every attempt (including failed validations), not only on success
 - Max 3 retry attempts for structured output (same as non-streaming path)
 
 ### Agent Module (`src/agent/`)
@@ -239,6 +239,9 @@ Example: `openrouter/openai/gpt-4o`, `openrouter/meta-llama/llama-3.1-8b-instruc
 - Provider-agnostic cost calculation
 - Cumulative metrics: cost, tokens (input/output/total)
 - Request counting and reporting
+- Tracks tokens from ALL LLM attempts including failed schema validations:
+  - Non-streaming: extracts `usage` from `NoObjectGeneratedError` thrown by Vercel AI SDK
+  - Streaming structured: awaits `usage` promise on failed validation before retrying
 
 ### Logging (`src/logger/`)
 

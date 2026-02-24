@@ -707,6 +707,20 @@ function tryStreamText<T>(
       } catch (error: unknown) {
         clearTimeout(attemptTimeoutId);
         const msg = error instanceof Error ? error.message : String(error);
+
+        // Attempt to track tokens from the failed stream — usage may or may not resolve
+        try {
+          const errUsage = await (rawResult.usage as Promise<{ inputTokens?: number; outputTokens?: number }>);
+          const errInputTokens = errUsage.inputTokens ?? 0;
+          const errOutputTokens = errUsage.outputTokens ?? 0;
+          if (errInputTokens > 0 || errOutputTokens > 0) {
+            costTracker.addCost(0);
+            costTracker.addTokens(errInputTokens, errOutputTokens);
+          }
+        } catch {
+          // Usage promise rejected — no token data available for this failed attempt
+        }
+
         logger.debug(`[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] Stream error: ${msg}`);
         if (attempt >= MAX_RETRIES) {
           throw new Error(`Streaming structured output failed after ${MAX_RETRIES} attempts: ${msg}`);
@@ -755,10 +769,30 @@ function tryStreamText<T>(
         };
       }
 
-      // Validation failed — send actual validation error to LLM for self-correction
-      logger.debug(
-        `[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] Structured output validation failed, retrying... Error: ${validationErrorMsg}`
-      );
+      // Validation failed — track cost/tokens from this attempt before retrying
+      try {
+        const failedUsage = await (rawResult.usage as Promise<{ inputTokens?: number; outputTokens?: number }>);
+        const failedInputTokens = failedUsage.inputTokens ?? 0;
+        const failedOutputTokens = failedUsage.outputTokens ?? 0;
+
+        // deno-lint-ignore no-explicit-any
+        const failedProviderMetadata = await (((rawResult as any).providerMetadata as Promise<Record<string, Record<string, unknown>> | undefined> | undefined)?.catch(() => undefined) ?? Promise.resolve(undefined));
+        const failedOrUsage = failedProviderMetadata?.openrouter?.usage as { cost?: number } | undefined;
+        const failedCost = failedOrUsage?.cost ?? (failedProviderMetadata?.openrouter?.cost as number) ?? 0;
+
+        if (failedInputTokens > 0 || failedOutputTokens > 0 || failedCost > 0) {
+          costTracker.addCost(failedCost);
+          costTracker.addTokens(failedInputTokens, failedOutputTokens);
+        }
+        logger.debug(
+          `[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] Structured output validation failed (tokens=${failedInputTokens + failedOutputTokens}), retrying... Error: ${validationErrorMsg}`
+        );
+      } catch {
+        logger.debug(
+          `[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] Structured output validation failed (usage unavailable), retrying... Error: ${validationErrorMsg}`
+        );
+      }
+
       allMessages.push({ role: "assistant", content: text || "" });
       allMessages.push({ role: "user", content: validationErrorMsg });
 
@@ -931,6 +965,9 @@ async function tryGenerateJson<T>(
         let validationError = "Unknown error";
         let rawResponse = "";
         let status = 500;
+        let errorInputTokens = 0;
+        let errorOutputTokens = 0;
+        const errorCost = 0;
 
         // Handle specific AI SDK error types to extract as much information as possible
         if (NoObjectGeneratedError.isInstance(error)) {
@@ -939,6 +976,11 @@ async function tryGenerateJson<T>(
           validationError = `The response does not match the required schema. Issues:\n${error.message}`;
           rawResponse = error.text ?? "";
           status = 200; // Model responded, but output was invalid
+          // Extract token usage from the failed attempt — the provider still charged for these tokens
+          if (error.usage) {
+            errorInputTokens = error.usage.inputTokens ?? 0;
+            errorOutputTokens = error.usage.outputTokens ?? 0;
+          }
         } else if (TypeValidationError.isInstance(error)) {
           validationError = `The JSON response does not match the required schema. Issues:\n${error.message}`;
           rawResponse = JSON.stringify(error.value);
@@ -958,6 +1000,12 @@ async function tryGenerateJson<T>(
           validationError = error instanceof Error ? error.message : String(error);
         }
 
+        // Track cost and tokens from the failed attempt so they are not lost
+        if (errorInputTokens > 0 || errorOutputTokens > 0 || errorCost > 0) {
+          costTracker.addCost(errorCost);
+          costTracker.addTokens(errorInputTokens, errorOutputTokens);
+        }
+
         // Log error response with whatever raw information we managed to capture
         const errorResponseData: YamlResponseData = {
           status,
@@ -967,16 +1015,16 @@ async function tryGenerateJson<T>(
         };
 
         logger.debug(
-          `[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] ❌ Error: status=${status}, error=${validationError}`
+          `[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] ❌ Error: status=${status}, error=${validationError}, tokens=${errorInputTokens + errorOutputTokens}`
         );
 
         return {
           result: null,
           newMessages: [],
           steps: [],
-          estimatedCost: 0,
-          inputTokens: 0,
-          outputTokens: 0,
+          estimatedCost: errorCost,
+          inputTokens: errorInputTokens,
+          outputTokens: errorOutputTokens,
           validationError: (status === 401 || status === 403 || status === 400)
             ? `Fatal API Error (${status}): ${validationError}`
             : validationError,

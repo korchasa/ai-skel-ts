@@ -72,6 +72,7 @@
 - [x] **FR-COST-2**: Calculate and accumulate USD costs
 - [x] **FR-COST-3**: Provide singleton instance for global cost tracking
 - [x] **FR-COST-4**: Generate detailed cost reports per request
+- [x] **FR-COST-5**: Accumulate tokens/costs from failed validation attempts during retry loops (non-streaming and streaming)
 
 ### Logging (FR-LOG)
 - [x] **FR-LOG-1**: Support structured YAML logging for LLM interactions
