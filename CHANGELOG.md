@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.8.2](https://github.com/korchasa/ai-skel-ts/compare/v0.8.1...v0.8.2) (2026-02-24)
+
+
+### Bug Fixes
+
+* **llm:** accumulate tokens and costs from failed validation attempts during retry loops ([ee85a51](https://github.com/korchasa/ai-skel-ts/commit/ee85a5108ef414f7889941eba6a01d904a695c7e))
+
 ### [0.8.1](https://github.com/korchasa/ai-skel-ts/compare/v0.8.0...v0.8.1) (2026-02-22)
 
 
