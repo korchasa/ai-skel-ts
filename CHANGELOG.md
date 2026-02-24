@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.8.4](https://github.com/korchasa/ai-skel-ts/compare/v0.8.3...v0.8.4) (2026-02-24)
+
+
+### Code Refactoring
+
+* **llm:** rename internal createLlmRequester to createVercelRequester to eliminate name collision with the unified factory ([2b3c990](https://github.com/korchasa/ai-skel-ts/commit/2b3c99028452ff895b37ce24cc840afe769a97fe))
+
 ### [0.8.3](https://github.com/korchasa/ai-skel-ts/compare/v0.8.2...v0.8.3) (2026-02-24)
 
 ### [0.8.2](https://github.com/korchasa/ai-skel-ts/compare/v0.8.1...v0.8.2) (2026-02-24)
