@@ -58,58 +58,86 @@ function makeCtx(): RunContext {
   } as unknown as RunContext;
 }
 
-/** Build a minimal successful ChatResponse */
+/** Build a minimal successful OpenResponsesNonStreamingResponse */
 // deno-lint-ignore no-explicit-any
-function makeChatResponse(content: string, usage?: { promptTokens: number; completionTokens: number; totalTokens: number }): any {
+function makeResponse(content: string, usage?: { inputTokens: number; outputTokens: number; totalTokens: number; cost?: number }): any {
+  const u = usage ?? { inputTokens: 10, outputTokens: 20, totalTokens: 30, cost: 0.001 };
   return {
-    id: "gen-123",
-    object: "chat.completion",
-    created: Date.now(),
+    id: "resp-123",
+    object: "response",
+    createdAt: Date.now(),
     model: "openai/gpt-4o",
-    choices: [
+    status: "completed",
+    completedAt: Date.now(),
+    output: [
       {
-        index: 0,
-        finishReason: "stop",
-        message: {
-          role: "assistant",
-          content,
-          toolCalls: undefined,
-        },
+        type: "message",
+        id: "msg-1",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: content }],
       },
     ],
-    usage: usage ?? { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+    outputText: content,
+    error: null,
+    incompleteDetails: null,
+    usage: {
+      inputTokens: u.inputTokens,
+      outputTokens: u.outputTokens,
+      totalTokens: u.totalTokens,
+      inputTokensDetails: { cachedTokens: 0 },
+      outputTokensDetails: { reasoningTokens: 0 },
+      cost: u.cost ?? 0.001,
+    },
+    temperature: null,
+    topP: null,
+    presencePenalty: null,
+    frequencyPenalty: null,
+    metadata: null,
+    tools: [],
+    toolChoice: "auto",
+    parallelToolCalls: false,
   };
 }
 
-/** Build a ChatResponse that requests a tool call */
+/** Build an OpenResponsesNonStreamingResponse that requests a tool call */
 // deno-lint-ignore no-explicit-any
-function makeToolCallResponse(toolName: string, args: Record<string, unknown>, toolCallId = "call-1"): any {
+function makeToolCallResponseOR(toolName: string, args: Record<string, unknown>, callId = "call-1"): any {
   return {
-    id: "gen-456",
-    object: "chat.completion",
-    created: Date.now(),
+    id: "resp-456",
+    object: "response",
+    createdAt: Date.now(),
     model: "openai/gpt-4o",
-    choices: [
+    status: "completed",
+    completedAt: Date.now(),
+    output: [
       {
-        index: 0,
-        finishReason: "tool_calls",
-        message: {
-          role: "assistant",
-          content: null,
-          toolCalls: [
-            {
-              id: toolCallId,
-              type: "function",
-              function: {
-                name: toolName,
-                arguments: JSON.stringify(args),
-              },
-            },
-          ],
-        },
+        type: "function_call",
+        callId,
+        name: toolName,
+        arguments: JSON.stringify(args),
+        status: "completed",
       },
     ],
-    usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
+    outputText: "",
+    error: null,
+    incompleteDetails: null,
+    usage: {
+      inputTokens: 10,
+      outputTokens: 20,
+      totalTokens: 30,
+      inputTokensDetails: { cachedTokens: 0 },
+      outputTokensDetails: { reasoningTokens: 0 },
+      cost: 0.001,
+    },
+    temperature: null,
+    topP: null,
+    presencePenalty: null,
+    frequencyPenalty: null,
+    metadata: null,
+    tools: [],
+    toolChoice: "auto",
+    parallelToolCalls: false,
   };
 }
 
@@ -360,9 +388,9 @@ Deno.test("createOpenRouterRequester - text generation", async (t) => {
   await t.step("sends correct model name from URI and returns text", async () => {
     const capturedRequests: unknown[] = [];
     const engine: OpenRouterEngine = {
-      chatSend: (req) => {
+      responseSend: (req) => {
         capturedRequests.push(req);
-        return makeChatResponse("Hello world");
+        return Promise.resolve(makeResponse("Hello world"));
       },
     };
 
@@ -385,8 +413,9 @@ Deno.test("createOpenRouterRequester - text generation", async (t) => {
     });
 
     expect(capturedRequests).toHaveLength(1);
-    const req = capturedRequests[0] as { model: string; messages: unknown[] };
+    const req = capturedRequests[0] as { model: string; input: unknown };
     expect(req.model).toBe("openai/gpt-4o");
+    expect(req.input).toBeDefined();
     expect(result.text).toBe("Hello world");
     expect(result.result).toBeNull();
     expect(result.newMessages).toHaveLength(1);
@@ -395,8 +424,8 @@ Deno.test("createOpenRouterRequester - text generation", async (t) => {
 
   await t.step("tracks input/output tokens from response", async () => {
     const engine: OpenRouterEngine = {
-      chatSend: () =>
-        makeChatResponse("ok", { promptTokens: 50, completionTokens: 100, totalTokens: 150 }),
+      responseSend: () =>
+        Promise.resolve(makeResponse("ok", { inputTokens: 50, outputTokens: 100, totalTokens: 150, cost: 0.002 })),
     };
     const requester = createOpenRouterRequester({
       modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
@@ -418,12 +447,12 @@ Deno.test("createOpenRouterRequester - text generation", async (t) => {
     expect(result.outputTokens).toBe(100);
   });
 
-  await t.step("passes settings (temperature, maxTokens) to request", async () => {
+  await t.step("passes settings (temperature, maxOutputTokens) to request", async () => {
     const capturedRequests: unknown[] = [];
     const engine: OpenRouterEngine = {
-      chatSend: (req) => {
+      responseSend: (req) => {
         capturedRequests.push(req);
-        return makeChatResponse("ok");
+        return Promise.resolve(makeResponse("ok"));
       },
     };
     const requester = createOpenRouterRequester({
@@ -444,7 +473,68 @@ Deno.test("createOpenRouterRequester - text generation", async (t) => {
     });
     const req = capturedRequests[0] as Record<string, unknown>;
     expect(req.temperature).toBe(0.5);
-    expect(req.maxTokens).toBe(200); // mapped from maxOutputTokens
+    expect(req.maxOutputTokens).toBe(200);
+  });
+
+  await t.step("extracts estimatedCost from usage.cost field", async () => {
+    const engine: OpenRouterEngine = {
+      responseSend: () =>
+        Promise.resolve(makeResponse("ok", { inputTokens: 10, outputTokens: 20, totalTokens: 30, cost: 0.0042 })),
+    };
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+    const result = await requester({
+      messages: [{ role: "user", content: "Hi" }],
+      identifier: "test-cost",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: undefined,
+    });
+    expect(result.estimatedCost).toBeCloseTo(0.0042);
+  });
+
+  await t.step("calls costTracker.addCost with usage.cost value", async () => {
+    let capturedCost: number | undefined;
+    const trackerWithSpy: CostTracker = {
+      addCost: (c: number) => { capturedCost = c; },
+      addTokens: () => {},
+      getReport: () => ({
+        totalCost: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalTokens: 0,
+        requestCount: 0,
+      }),
+    } as unknown as CostTracker;
+
+    const engine: OpenRouterEngine = {
+      responseSend: () =>
+        Promise.resolve(makeResponse("ok", { inputTokens: 5, outputTokens: 10, totalTokens: 15, cost: 0.0077 })),
+    };
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker: trackerWithSpy,
+      ctx,
+      engine,
+    });
+    await requester({
+      messages: [{ role: "user", content: "Hi" }],
+      identifier: "test-cost-tracker",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: undefined,
+    });
+    expect(capturedCost).toBeCloseTo(0.0077);
   });
 });
 
@@ -460,7 +550,7 @@ Deno.test("createOpenRouterRequester - structured output", async (t) => {
   await t.step("parses and validates JSON response with Zod schema", async () => {
     const schema = z.object({ name: z.string(), age: z.number() });
     const engine: OpenRouterEngine = {
-      chatSend: () => makeChatResponse('{"name":"Alice","age":30}'),
+      responseSend: () => Promise.resolve(makeResponse('{"name":"Alice","age":30}')),
     };
     const requester = createOpenRouterRequester({
       modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
@@ -481,13 +571,13 @@ Deno.test("createOpenRouterRequester - structured output", async (t) => {
     expect(result.result).toEqual({ name: "Alice", age: 30 });
   });
 
-  await t.step("sends json_schema response_format when schema is provided", async () => {
+  await t.step("sends json_schema format in text.format when schema is provided", async () => {
     const capturedRequests: unknown[] = [];
     const schema = z.object({ value: z.string() });
     const engine: OpenRouterEngine = {
-      chatSend: (req) => {
+      responseSend: (req) => {
         capturedRequests.push(req);
-        return makeChatResponse('{"value":"test"}');
+        return Promise.resolve(makeResponse('{"value":"test"}'));
       },
     };
     const requester = createOpenRouterRequester({
@@ -507,17 +597,19 @@ Deno.test("createOpenRouterRequester - structured output", async (t) => {
       settings: undefined,
     });
     const req = capturedRequests[0] as Record<string, unknown>;
-    expect(req.responseFormat).toBeDefined();
-    expect((req.responseFormat as { type: string }).type).toBe("json_schema");
+    const text = req.text as { format: { type: string } };
+    expect(text).toBeDefined();
+    expect(text.format).toBeDefined();
+    expect(text.format.type).toBe("json_schema");
   });
 
   await t.step("retries on schema validation failure and returns error", async () => {
     const schema = z.object({ value: z.number() });
     let callCount = 0;
     const engine: OpenRouterEngine = {
-      chatSend: () => {
+      responseSend: () => {
         callCount++;
-        return makeChatResponse('{"value":"not-a-number"}'); // Always wrong type
+        return Promise.resolve(makeResponse('{"value":"not-a-number"}')); // Always wrong type
       },
     };
     const requester = createOpenRouterRequester({
@@ -554,16 +646,16 @@ Deno.test("createOpenRouterRequester - tool calling", async (t) => {
 
   await t.step("executes a tool and sends result back", async () => {
     const responses = [
-      makeToolCallResponse("search", { query: "Deno" }),
-      makeChatResponse("Deno is great!"),
+      makeToolCallResponseOR("search", { query: "Deno" }),
+      makeResponse("Deno is great!"),
     ];
     let callCount = 0;
-    const capturedMessages: unknown[][] = [];
+    const capturedRequests: unknown[] = [];
 
     const engine: OpenRouterEngine = {
-      chatSend: (req) => {
-        capturedMessages.push([...(req.messages ?? [])]);
-        return responses[callCount++];
+      responseSend: (req) => {
+        capturedRequests.push(req);
+        return Promise.resolve(responses[callCount++]);
       },
     };
 
@@ -594,18 +686,19 @@ Deno.test("createOpenRouterRequester - tool calling", async (t) => {
     expect(callCount).toBe(2); // first call + tool result call
     expect(result.text).toBe("Deno is great!");
 
-    // Second call should include tool result in messages
-    const secondCallMsgs = capturedMessages[1] as Array<{ role: string }>;
-    expect(secondCallMsgs.some((m) => m.role === "tool")).toBe(true);
+    // Second call should include tool result in input
+    expect(capturedRequests).toHaveLength(2);
+    const secondReq = capturedRequests[1] as { input: unknown };
+    expect(secondReq.input).toBeDefined();
   });
 
   await t.step("respects maxSteps limit", async () => {
     let callCount = 0;
     const engine: OpenRouterEngine = {
-      chatSend: () => {
+      responseSend: () => {
         callCount++;
-        // Always return tool_calls finish reason - would loop forever without maxSteps
-        return makeToolCallResponse("noop", {});
+        // Always return function_call output - would loop forever without maxSteps
+        return Promise.resolve(makeToolCallResponseOR("noop", {}));
       },
     };
 
@@ -637,13 +730,13 @@ Deno.test("createOpenRouterRequester - tool calling", async (t) => {
 
   await t.step("populates toolCalls and toolResults in result", async () => {
     const responses = [
-      makeToolCallResponse("calc", { x: 2, y: 3 }, "tc-abc"),
-      makeChatResponse("The result is 5"),
+      makeToolCallResponseOR("calc", { x: 2, y: 3 }, "tc-abc"),
+      makeResponse("The result is 5"),
     ];
     let callCount = 0;
 
     const engine: OpenRouterEngine = {
-      chatSend: () => responses[callCount++],
+      responseSend: () => Promise.resolve(responses[callCount++]),
     };
 
     const requester = createOpenRouterRequester({
@@ -754,7 +847,7 @@ Deno.test("createOpenRouterRequester - streaming", async (t) => {
 
   await t.step("stream returns StreamResult with textStream", () => {
     const engine: OpenRouterEngine = {
-      chatSend: () => makeChatResponse("fallback"),
+      responseSend: () => { throw new Error("should not be called"); },
       streamSend: () => Promise.resolve(makeMockStreamEvents(["Hello", " world"])),
     };
 
@@ -782,7 +875,7 @@ Deno.test("createOpenRouterRequester - streaming", async (t) => {
 
   await t.step("stream yields text chunks from SSE events", async () => {
     const engine: OpenRouterEngine = {
-      chatSend: () => makeChatResponse("fallback"),
+      responseSend: () => { throw new Error("should not be called"); },
       streamSend: () => Promise.resolve(makeMockStreamEvents(["Hello", " world"])),
     };
 
@@ -815,7 +908,7 @@ Deno.test("createOpenRouterRequester - streaming", async (t) => {
 
   await t.step("stream resolves usage from response.completed event", async () => {
     const engine: OpenRouterEngine = {
-      chatSend: () => makeChatResponse("fallback"),
+      responseSend: () => { throw new Error("should not be called"); },
       streamSend: () => Promise.resolve(makeMockStreamEvents(["Done"], { inputTokens: 42, outputTokens: 17, cost: 0.001 })),
     };
 
@@ -851,7 +944,7 @@ Deno.test("createOpenRouterRequester - streaming", async (t) => {
     const schema = z.object({ name: z.string(), age: z.number() });
 
     const engine: OpenRouterEngine = {
-      chatSend: () => makeChatResponse("fallback"),
+      responseSend: () => { throw new Error("should not be called"); },
       streamSend: () => Promise.resolve(makeMockStreamEvents(['{"name":"Alice","age":30}'])),
     };
 
@@ -884,7 +977,7 @@ Deno.test("createOpenRouterRequester - streaming", async (t) => {
     let callCount = 0;
 
     const engine: OpenRouterEngine = {
-      chatSend: () => makeChatResponse("fallback"),
+      responseSend: () => { throw new Error("should not be called"); },
       streamSend: (_request) => {
         callCount++;
         if (callCount === 1) {

@@ -51,24 +51,28 @@ graph TD
 
 - `createOpenRouterRequester()`: Factory returning `LlmRequester`-compatible function
 - `convertToOrMessages()`: Converts Vercel AI SDK `ModelMessage[]` → OpenRouter `Message[]` (supports v6 `input`/`output` and legacy v5 `args`/`result` formats)
-- `convertToOrTools()`: Converts Vercel AI SDK `Record<string, Tool>` → OpenRouter `ToolDefinitionJson[]`
-- `OpenRouterEngine`: Interface for HTTP transport (enables mocking in tests)
+- `convertToOrTools()`: Converts Vercel AI SDK `Record<string, Tool>` → OpenRouter `ToolDefinitionJson[]` (Chat Completions format, kept for backward compat)
+- `convertToOrRequestTools()`: Converts tools to OpenResponses API flat format (`{ type, name, parameters }`)
+- `OpenRouterEngine`: Interface for HTTP transport (enables mocking in tests); `responseSend` for non-streaming, `streamSend` for streaming
 
 **Features**:
 
-- Non-streaming: `chatSend()` via `client.chat.send()` (Chat Completions API)
-- Streaming: `.stream` property (`LlmStreamer`) via `client.beta.responses.send({ openResponsesRequest })` (OpenResponses SSE API, `stream: true`)
+- Both non-streaming and streaming use the **OpenResponses API** (`client.beta.responses.send({ openResponsesRequest })`)
+  - Non-streaming: `responseSend()` with `stream: false` — response includes `usage.cost` for accurate cost tracking
+  - Streaming: `.stream` property (`LlmStreamer`) with `stream: true` — SSE events
+- Streaming details:
   - Text-only: real-time SSE `response.output_text.delta` chunks forwarded to `textStream`
   - Structured output: buffered internally, validated, replayed on success (same 3-retry pattern)
   - Tool calling: `response.output_item.done` function_call events → execute → loop
   - Usage/cost from `response.completed` event
-- Structured output via Zod v3 schema → JSON Schema → `response_format: json_schema` (non-streaming) / `text.format` (streaming)
+- Structured output via Zod schema → JSON Schema → `text.format: { type: "json_schema" }` for both streaming and non-streaming
 - Tool calling with automatic execution and multi-step loop (up to `maxSteps`)
+  - Tool continuation uses native OpenResponses input format (`function_call` + `function_call_output` items), not Chat Completions message conversion
 - Retry logic (3 attempts) with self-correction on JSON parse / Zod validation failures
-- CostTracker, Logger, RunContext integration
-- Backward compatible with messages from `createLlmRequester`
+- CostTracker, Logger, RunContext integration (cost extracted from `usage.cost` in API response)
+- Backward compatible with messages from `createVercelRequester`
 
-**SDK API note**: Deno-cached `betaResponsesSend.js` requires `{ openResponsesRequest: request }` wrapper (not bare `request`) for `client.beta.responses.send()`.
+**SDK API note**: SDK v0.8.0 (used by Deno) requires `{ openResponsesRequest: request }` wrapper for `client.beta.responses.send()`. The `chatSend` method on `OpenRouterEngine` is deprecated; `responseSend` is used for non-streaming requests.
 
 **URI format**: `openrouter/<provider>/<model>?apiKey=...`
 Example: `openrouter/openai/gpt-4o`, `openrouter/meta-llama/llama-3.1-8b-instruct`

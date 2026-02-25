@@ -15,7 +15,6 @@ import type {
   Message,
   ToolDefinitionJson,
 } from "@openrouter/sdk/models";
-import type { SendChatCompletionRequestRequest } from "@openrouter/sdk/models/operations";
 import type {
   OpenResponsesNonStreamingResponse,
   OpenResponsesRequest,
@@ -45,12 +44,16 @@ import { ModelURI } from "../llm/llm.ts";
 /**
  * Interface for the underlying HTTP transport to allow mocking in tests.
  *
- * `chatSend` handles non-streaming requests (existing behaviour).
+ * `responseSend` handles non-streaming requests via the OpenResponses API (includes cost in usage).
  * `streamSend` handles streaming requests and returns an async iterable of SSE events.
- * `streamSend` is optional — it only needs to be provided when streaming is used.
+ *
+ * Legacy `chatSend` is kept for backward compatibility but is no longer used by the requester.
  */
 export interface OpenRouterEngine {
-  chatSend(params: ChatGenerationParams): Promise<ChatResponse>;
+  /** @deprecated Use `responseSend` instead. Kept for backward compatibility. */
+  chatSend?(params: ChatGenerationParams): Promise<ChatResponse>;
+  /** Non-streaming request via OpenResponses API. Returns response with usage (including cost). */
+  responseSend?(request: OpenResponsesRequest & { stream?: false }): Promise<OpenResponsesNonStreamingResponse>;
   /** Returns an async iterable of OpenResponses SSE events. Typed as `unknown` to allow easy mocking. */
   // deno-lint-ignore no-explicit-any
   streamSend?: (request: OpenResponsesRequest & { stream: true }) => Promise<AsyncIterable<any>>;
@@ -560,6 +563,10 @@ function buildStreamResult<T>(
       const errorMsg = err instanceof Error ? err.message : String(err);
       logger.error(`[OpenRouter] [run:${ctx.runId}] [id:${identifier}] ❌ Stream error: ${errorMsg}`);
 
+      // Track accumulated cost/tokens even on error
+      costTracker.addCost(totalCost);
+      costTracker.addTokens(totalInputTokens, totalOutputTokens);
+
       // Resolve all promises with safe defaults so consumers don't hang
       resolveText(fullText);
       resolveOutput(null);
@@ -648,15 +655,15 @@ export function createOpenRouterRequester(
 
   // Build engine (real or injected for tests)
   const engine: OpenRouterEngine = providedEngine ?? {
-    chatSend: (reqParams: ChatGenerationParams): Promise<ChatResponse> => {
+    responseSend: async (request: OpenResponsesRequest & { stream?: false }): Promise<OpenResponsesNonStreamingResponse> => {
       const client = new OpenRouter({
         apiKey,
         ...(baseURL ? { serverURL: baseURL } : {}),
       });
-      const req: SendChatCompletionRequestRequest & { chatGenerationParams: { stream?: false } } = {
-        chatGenerationParams: { ...reqParams, stream: false as const },
-      };
-      return client.chat.send(req);
+      // The Deno-cached version expects { openResponsesRequest: ... } wrapper
+      // deno-lint-ignore no-explicit-any
+      const response = await (client.beta.responses as any).send({ openResponsesRequest: { ...request, stream: false } });
+      return response as OpenResponsesNonStreamingResponse;
     },
     streamSend: async (request: OpenResponsesRequest & { stream: true }): Promise<AsyncIterable<OpenResponsesStreamEvent>> => {
       const client = new OpenRouter({
@@ -671,8 +678,13 @@ export function createOpenRouterRequester(
   };
 
   // ---------------------------------------------------------------------------
-  // Non-streaming requester (existing implementation)
+  // Non-streaming requester (uses OpenResponses API for cost tracking)
   // ---------------------------------------------------------------------------
+
+  if (!engine.responseSend) {
+    throw new Error("[OpenRouter] Engine must implement responseSend for non-streaming requests.");
+  }
+  const responseSendFn = engine.responseSend;
 
   const requester = async <T>(
     reqParams: Readonly<{
@@ -713,7 +725,7 @@ export function createOpenRouterRequester(
     const newMessages: ModelMessage[] = [];
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
-    const totalCost = 0;
+    let totalCost = 0;
 
     // Retry loop for validation errors
     let lastValidationError: string | undefined;
@@ -729,27 +741,38 @@ export function createOpenRouterRequester(
 
       try {
         // Tool execution loop within this attempt
-        let orMessages = convertToOrMessages(currentMessages);
-        const orTools = tools ? convertToOrTools(tools) : undefined;
+        const orRequestTools = tools ? convertToOrRequestTools(tools) : undefined;
 
         const maxStepsUsed = maxSteps ?? (tools ? 5 : 1);
         let stepCount = 0;
-        let lastResponse: ChatResponse | null = null;
+        let lastResponse: OpenResponsesNonStreamingResponse | null = null;
+
+        // Build initial input from messages.
+        // orInput is the native OpenResponses input format (user/assistant/function_call/function_call_output items).
+        // We mutate it directly during tool loops instead of round-tripping through convertToOrMessages + fromChatMessages,
+        // because fromChatMessages loses function_call items (produces empty assistant messages instead).
+        const orMessages = convertToOrMessages(currentMessages);
+        // deno-lint-ignore no-explicit-any
+        const orInputRaw = fromChatMessages(orMessages as any);
+        // Ensure orInput is always an array (fromChatMessages can return string for simple prompts)
+        // deno-lint-ignore no-explicit-any
+        const orInput: any[] = typeof orInputRaw === "string" ? [{ role: "user", content: orInputRaw }] : orInputRaw as any[];
 
         while (stepCount < maxStepsUsed) {
           stepCount++;
 
-          // Build request params
-          const requestParams: ChatGenerationParams = {
+          // Build OpenResponses request
+          const request: OpenResponsesRequest & { stream?: false } = {
             model: modelName,
-            messages: orMessages,
+            // deno-lint-ignore no-explicit-any
+            input: orInput as any,
             stream: false as const,
-            ...(orTools && orTools.length > 0 ? { tools: orTools } : {}),
+            ...(orRequestTools && orRequestTools.length > 0 ? { tools: orRequestTools } : {}),
             ...(schema
               ? {
-                  responseFormat: {
-                    type: "json_schema" as const,
-                    jsonSchema: {
+                  text: {
+                    format: {
+                      type: "json_schema" as const,
                       name: "response",
                       schema: toJSONSchema(schema) as Record<string, unknown>,
                       strict: true,
@@ -758,57 +781,80 @@ export function createOpenRouterRequester(
                 }
               : {}),
             ...(settings?.temperature !== undefined ? { temperature: settings.temperature } : {}),
-            ...(settings?.maxOutputTokens !== undefined ? { maxTokens: settings.maxOutputTokens } : {}),
+            ...(settings?.maxOutputTokens !== undefined ? { maxOutputTokens: settings.maxOutputTokens } : {}),
             ...(settings?.topP !== undefined ? { topP: settings.topP } : {}),
             ...(settings?.frequencyPenalty !== undefined ? { frequencyPenalty: settings.frequencyPenalty } : {}),
             ...(settings?.presencePenalty !== undefined ? { presencePenalty: settings.presencePenalty } : {}),
-            ...(settings?.seed !== undefined ? { seed: settings.seed } : {}),
           };
 
-          const response = await engine.chatSend(requestParams);
+          const response = await responseSendFn(request);
           lastResponse = response;
 
-          // Accumulate token usage
+          // Accumulate token usage and cost from OpenResponses API
           const usage = response.usage;
           if (usage) {
-            totalInputTokens += usage.promptTokens ?? 0;
-            totalOutputTokens += usage.completionTokens ?? 0;
+            totalInputTokens += usage.inputTokens ?? 0;
+            totalOutputTokens += usage.outputTokens ?? 0;
+            totalCost += usage.cost ?? 0;
           }
 
-          const choice = response.choices[0];
-          const finishReason = choice?.finishReason;
-          const assistantMsg = choice?.message;
+          // Extract text and function calls from output items
+          let stepText = "";
+          const stepFunctionCalls: Array<{ callId: string; name: string; arguments: string }> = [];
 
-          if (!assistantMsg) break;
+          for (const item of response.output) {
+            if (item.type === "message") {
+              // Extract text from message content
+              for (const part of (item as { content: Array<{ type: string; text?: string }> }).content) {
+                if (part.type === "output_text" && part.text) {
+                  stepText += part.text;
+                }
+              }
+            } else if (item.type === "function_call") {
+              const fc = item as { callId: string; name: string; arguments: string };
+              stepFunctionCalls.push({
+                callId: fc.callId,
+                name: fc.name,
+                arguments: fc.arguments,
+              });
+            }
+          }
 
-          lastRawResponse = typeof assistantMsg.content === "string"
-            ? assistantMsg.content
-            : JSON.stringify(assistantMsg.content);
+          // Fallback: use outputText convenience field if no text found in output items
+          if (!stepText && response.outputText) {
+            stepText = response.outputText;
+          }
+
+          lastRawResponse = stepText;
 
           // Check for tool calls
-          const toolCallList = assistantMsg.toolCalls;
-          if (
-            finishReason === "tool_calls" &&
-            toolCallList &&
-            toolCallList.length > 0 &&
-            tools
-          ) {
+          if (stepFunctionCalls.length > 0 && tools) {
             // Record assistant message with tool calls in newMessages
             newMessages.push({
               role: "assistant",
               content: [
-                ...(assistantMsg.content ? [{ type: "text" as const, text: typeof assistantMsg.content === "string" ? assistantMsg.content : "" }] : []),
-                ...toolCallList.map((tc) => ({
+                ...(stepText ? [{ type: "text" as const, text: stepText }] : []),
+                ...stepFunctionCalls.map((tc) => ({
                   type: "tool-call" as const,
-                  toolCallId: tc.id,
-                  toolName: tc.function.name,
-                  input: JSON.parse(tc.function.arguments),
+                  toolCallId: tc.callId,
+                  toolName: tc.name,
+                  input: (() => {
+                    try { return JSON.parse(tc.arguments); } catch { return {}; }
+                  })(),
                 })),
               ],
             } as unknown as ModelMessage);
 
             // Execute tools
-            const execResults = await executeToolCalls(toolCallList, tools, currentMessages);
+            const execResults = await executeToolCalls(
+              stepFunctionCalls.map((tc) => ({
+                id: tc.callId,
+                type: "function",
+                function: { name: tc.name, arguments: tc.arguments },
+              })),
+              tools,
+              currentMessages,
+            );
 
             // Accumulate tool calls/results for the final GenerateResult
             for (const r of execResults) {
@@ -829,8 +875,24 @@ export function createOpenRouterRequester(
               } as unknown as ModelMessage);
             }
 
-            // Rebuild orMessages from scratch for next iteration
-            orMessages = convertToOrMessages([...currentMessages, ...newMessages]);
+            // Append function_call + function_call_output items directly to orInput
+            // (OpenResponses API requires: function_call item followed by function_call_output item)
+            for (const tc of stepFunctionCalls) {
+              orInput.push({
+                type: "function_call",
+                callId: tc.callId,
+                name: tc.name,
+                arguments: tc.arguments,
+              });
+            }
+            for (const r of execResults) {
+              const resultStr = typeof r.result === "string" ? r.result : JSON.stringify(r.result);
+              orInput.push({
+                type: "function_call_output",
+                callId: r.toolCallId,
+                output: resultStr,
+              });
+            }
 
             continue; // Next step
           }
@@ -843,8 +905,7 @@ export function createOpenRouterRequester(
           throw new Error("No response received from OpenRouter API");
         }
 
-        const finalContent = lastResponse.choices[0]?.message?.content ?? "";
-        const finalText = typeof finalContent === "string" ? finalContent : JSON.stringify(finalContent);
+        const finalText = lastRawResponse ?? lastResponse.outputText ?? "";
 
         // Add final assistant message to newMessages
         newMessages.push({ role: "assistant", content: finalText });
@@ -1005,7 +1066,7 @@ export function createOpenRouterRequester(
         const attemptLog: YamlLogAttempt = {
           attempt,
           timestamp: attemptTimestamp,
-          stats: { duration, cost: 0, tokens: { input: 0, output: 0, total: 0 } },
+          stats: { duration, cost: totalCost, tokens: { input: totalInputTokens, output: totalOutputTokens, total: totalInputTokens + totalOutputTokens } },
           error: errorMsg,
         };
         yamlLogData.attempts.push(attemptLog);
@@ -1019,6 +1080,9 @@ export function createOpenRouterRequester(
           continue;
         }
 
+        // Track accumulated cost/tokens even on final error
+        costTracker.addCost(totalCost);
+        costTracker.addTokens(totalInputTokens, totalOutputTokens);
         await saveYamlLog({ ctx, stageName, logId, yamlLogData, logger });
         throw err;
       }
