@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.8.5](https://github.com/korchasa/ai-skel-ts/compare/v0.8.4...v0.8.5) (2026-02-25)
+
+
+### Bug Fixes
+
+* **openrouter:** switch non-streaming to OpenResponses API and fix tool calling input format ([9def44a](https://github.com/korchasa/ai-skel-ts/commit/9def44adec0b37c810f52af808c24384fe4edc4a))
+
 ### [0.8.4](https://github.com/korchasa/ai-skel-ts/compare/v0.8.3...v0.8.4) (2026-02-24)
 
 
