@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.8.7](https://github.com/korchasa/ai-skel-ts/compare/v0.8.6...v0.8.7) (2026-02-28)
+
+
+### Features
+
+* **llm:** make validation retry count configurable via maxValidationRetries URI parameter ([8aeb99a](https://github.com/korchasa/ai-skel-ts/commit/8aeb99a6c375e4dacb428006cbf8fe8af1cdd195)), closes [#7](https://github.com/korchasa/ai-skel-ts/issues/7)
+
 ### [0.8.6](https://github.com/korchasa/ai-skel-ts/compare/v0.8.5...v0.8.6) (2026-02-28)
 
 
