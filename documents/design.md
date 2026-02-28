@@ -96,7 +96,7 @@ Example: `openrouter/openai/gpt-4o`, `openrouter/meta-llama/llama-3.1-8b-instruc
 - Warning Suppression: Global `AI_SDK_LOG_WARNINGS` control via `logVercelWarnings` URI parameter
 - Retry Logic: 3-attempt exponential backoff (1s, 2s, 4s)
 - Self-Correction: Retry on validation failures with error context
-- Timeout Control: Per-attempt timeout (default 30s) using AbortController with try-catch protection on `.abort()` calls to prevent process crashes from throwing listeners.
+- Timeout Control: Per-attempt timeout (default 30s) using AbortController. Defense-in-depth against abort/settle race condition: a `settled` flag in the timeout callback skips `abort()` if the promise already settled, and `clearTimeout` in `finally` cancels the timer. Both guards are needed because `clearTimeout` cannot cancel a callback already queued as a macrotask.
 - Parameter Support: URI defaults + per-request overrides
 - Tool Support: Integration with Vercel AI SDK `Tool` interface and `maxSteps` (via `stopWhen`)
 - Observability: Full step-by-step logging of tool calls and results

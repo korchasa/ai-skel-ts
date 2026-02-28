@@ -579,7 +579,10 @@ function tryStreamText<T>(
     );
 
     const controller = new AbortController();
+    // Guard flag: prevents abort() after the stream completes. See issue #6.
+    let settled = false;
     const timeoutId = setTimeout(() => {
+      if (settled) return;
       try {
         controller.abort();
       } catch (error) {
@@ -600,6 +603,7 @@ function tryStreamText<T>(
 
     // Side effect: update token tracker when stream completes. Also clears timeout guard.
     const usagePromise = (rawResult.usage as Promise<{ inputTokens?: number; outputTokens?: number; totalTokens?: number }>).then(usage => {
+      settled = true;
       clearTimeout(timeoutId);
       const inputTokens = usage.inputTokens ?? 0;
       const outputTokens = usage.outputTokens ?? 0;
@@ -610,6 +614,7 @@ function tryStreamText<T>(
       );
       return { inputTokens, outputTokens };
     }).catch((err) => {
+      settled = true;
       clearTimeout(timeoutId);
       throw err;
     });
@@ -672,7 +677,10 @@ function tryStreamText<T>(
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       const controller = new AbortController();
+      // Guard flag: prevents abort() after the stream settles. See issue #6.
+      let attemptSettled = false;
       const attemptTimeoutId = setTimeout(() => {
+        if (attemptSettled) return;
         try {
           controller.abort();
         } catch (error) {
@@ -698,6 +706,7 @@ function tryStreamText<T>(
 
       try {
         text = await (rawResult.text as Promise<string>);
+        attemptSettled = true;
         clearTimeout(attemptTimeoutId);
         try {
           output = await (rawResult.output as Promise<T | null>);
@@ -706,6 +715,7 @@ function tryStreamText<T>(
           validationErrorMsg = validationError instanceof Error ? validationError.message : String(validationError);
         }
       } catch (error: unknown) {
+        attemptSettled = true;
         clearTimeout(attemptTimeoutId);
         const msg = error instanceof Error ? error.message : String(error);
 
@@ -879,7 +889,15 @@ async function tryGenerateJson<T>(
       try {
         const controller = new AbortController();
         const timeoutMs = settings?.timeout ?? 30000;
+        // Guard flag: prevents abort() from firing after the generateText promise
+        // has already settled. This closes the race condition where the setTimeout
+        // callback is already queued in the macrotask queue when clearTimeout runs,
+        // causing abort() to trigger AbortError in dangling SDK-internal listeners
+        // (e.g., fetch) that are no longer awaited — resulting in an unhandled
+        // promise rejection that crashes the process. See GitHub issue #6.
+        let settled = false;
         const timeoutId = setTimeout(() => {
+          if (settled) return;
           try {
             controller.abort();
           } catch (error) {
@@ -901,6 +919,7 @@ async function tryGenerateJson<T>(
             ...settings,
           } as Record<string, unknown>);
         } finally {
+          settled = true;
           clearTimeout(timeoutId);
         }
 
