@@ -282,6 +282,8 @@ interface ParsedModelUri {
   readonly apiKey?: string;
   readonly baseURL?: string;
   readonly logVercelWarnings?: boolean;
+  /** Maximum number of validation retry attempts. Defaults to DEFAULT_MAX_VALIDATION_RETRIES. */
+  readonly maxValidationRetries: number;
   readonly params: Readonly<Record<string, string>>;
   readonly settings: LlmSettings;
 }
@@ -343,7 +345,7 @@ interface YamlLogAttempt {
   readonly error?: string;
 }
 
-const MAX_RETRIES = 3;
+const DEFAULT_MAX_VALIDATION_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000;
 
 /**
@@ -388,6 +390,7 @@ function parseModelUri({ uri }: Readonly<{ uri: ModelURI }>): ParsedModelUri {
   const result: ParsedModelUri = {
     provider: uri.provider,
     modelName: uri.modelName,
+    maxValidationRetries: DEFAULT_MAX_VALIDATION_RETRIES,
     params: {},
     settings: {},
   };
@@ -400,6 +403,12 @@ function parseModelUri({ uri }: Readonly<{ uri: ModelURI }>): ParsedModelUri {
     else if (key === "baseURL") (result as { baseURL?: string }).baseURL = value;
     else if (key === "logVercelWarnings") {
       (result as { logVercelWarnings?: boolean }).logVercelWarnings = value !== "false";
+    }
+    else if (key === "maxValidationRetries") {
+      const numValue = Number(value);
+      if (!isNaN(numValue) && numValue >= 1) {
+        (result as { maxValidationRetries: number }).maxValidationRetries = numValue;
+      }
     }
     else if (["maxTokens", "temperature", "topP", "topK", "frequencyPenalty", "presencePenalty", "seed", "maxRetries", "timeout"].includes(key)) {
       const numValue = Number(value);
@@ -579,7 +588,7 @@ async function saveStreamYamlLog(
  * - Structured (with schema): buffered retry loop — consumer sees only the successful attempt.
  */
 function tryStreamText<T>(
-  { identifier, schema, tools, maxSteps, messages, ctx, modelInstance, maskedUri, costTracker, logger, settings, engine, _stageName }: Readonly<{
+  { identifier, schema, tools, maxSteps, messages, ctx, modelInstance, maskedUri, costTracker, logger, settings, engine, _stageName, maxValidationRetries }: Readonly<{
     identifier: string;
     schema: z.ZodType<T> | undefined;
     tools: Record<string, Tool> | undefined;
@@ -592,6 +601,7 @@ function tryStreamText<T>(
     logger: Logger;
     settings: LlmSettings | undefined;
     engine: LlmEngine;
+    maxValidationRetries: number;
     /** Stage name for future debug file logging (not yet used in streaming path). */
     _stageName: string;
   }>
@@ -756,7 +766,7 @@ function tryStreamText<T>(
   const workPromise: Promise<StructuredWorkResult<T>> = (async () => {
     const allMessages = [...messages];
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    for (let attempt = 1; attempt <= maxValidationRetries; attempt++) {
       const attemptStart = Date.now();
       const controller = new AbortController();
       // Guard flag: prevents abort() after the stream settles. See issue #6.
@@ -824,10 +834,10 @@ function tryStreamText<T>(
         });
 
         logger.debug(`[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] Stream error: ${msg}`);
-        if (attempt >= MAX_RETRIES) {
+        if (attempt >= maxValidationRetries) {
           // Write YAML debug file before throwing
           await saveStreamYamlLog({ ctx, stageName: _stageName, yamlLogData: streamLogData, logger });
-          throw new Error(`Streaming structured output failed after ${MAX_RETRIES} attempts: ${msg}`);
+          throw new Error(`Streaming structured output failed after ${maxValidationRetries} attempts: ${msg}`);
         }
         allMessages.push({ role: "assistant", content: text || "" });
         allMessages.push({ role: "user", content: msg });
@@ -930,7 +940,7 @@ function tryStreamText<T>(
       allMessages.push({ role: "assistant", content: text || "" });
       allMessages.push({ role: "user", content: validationErrorMsg });
 
-      if (attempt < MAX_RETRIES) {
+      if (attempt < maxValidationRetries) {
         const delay = calculateRetryDelay({ attempt });
         await new Promise(r => setTimeout(r, delay));
       }
@@ -938,7 +948,7 @@ function tryStreamText<T>(
 
     // Write YAML debug file before throwing (all attempts exhausted)
     await saveStreamYamlLog({ ctx, stageName: _stageName, yamlLogData: streamLogData, logger });
-    throw new Error(`Streaming structured output failed: validation did not pass after ${MAX_RETRIES} attempts`);
+    throw new Error(`Streaming structured output failed: validation did not pass after ${maxValidationRetries} attempts`);
   })();
 
   // Return StreamResult with lazy async iterables backed by workPromise
@@ -987,7 +997,7 @@ function tryStreamText<T>(
  * .refine() and .superRefine().
  */
 async function tryGenerateJson<T>(
-  { identifier, schema, tools, maxSteps, attempt, messages, ctx, modelInstance, maskedUri, costTracker, logger, settings, engine }: Readonly<{
+  { identifier, schema, tools, maxSteps, attempt, messages, ctx, modelInstance, maskedUri, costTracker, logger, settings, engine, maxValidationRetries }: Readonly<{
     identifier: string;
     schema: z.ZodType<T> | undefined;
     tools: Record<string, Tool> | undefined;
@@ -1001,6 +1011,7 @@ async function tryGenerateJson<T>(
     logger: Logger;
     settings: LlmSettings | undefined;
     engine: LlmEngine;
+    maxValidationRetries: number;
   }>
 ): Promise<GenerateResult<T> & { logAttempt: YamlLogAttempt }> {
   const timestamp = new Date().toISOString();
@@ -1008,7 +1019,7 @@ async function tryGenerateJson<T>(
 
     try {
       logger.debug(
-        `[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] 🚀 Request: model=${maskedUri}, maxRetries=${MAX_RETRIES}, timeout=${settings?.timeout ?? 30000}ms, attempt=${attempt}`
+        `[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] 🚀 Request: model=${maskedUri}, maxValidationRetries=${maxValidationRetries}, timeout=${settings?.timeout ?? 30000}ms, attempt=${attempt}`
       );
 
       try {
@@ -1216,7 +1227,7 @@ async function tryGenerateJson<T>(
 export function createVercelRequester(params: LlmRequesterParams): LlmRequester {
   const { modelUri, logger, costTracker, ctx } = params;
   const parsed = parseModelUri({ uri: modelUri });
-  const { settings: defaultSettings } = parsed;
+  const { settings: defaultSettings, maxValidationRetries } = parsed;
 
   if (parsed.logVercelWarnings === false) {
     // deno-lint-ignore no-explicit-any
@@ -1268,7 +1279,7 @@ export function createVercelRequester(params: LlmRequesterParams): LlmRequester 
     await ensureDebugDir({ debugDir });
     await writeFile(logFile, createYamlLog({ logData }), "utf-8");
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    for (let attempt = 1; attempt <= maxValidationRetries; attempt++) {
       const result = await tryGenerateJson<T>({
         identifier,
         schema,
@@ -1282,7 +1293,8 @@ export function createVercelRequester(params: LlmRequesterParams): LlmRequester 
         costTracker,
         logger,
         settings: mergedSettings,
-        engine: requester.engine || defaultLlmEngine
+        engine: requester.engine || defaultLlmEngine,
+        maxValidationRetries,
       });
 
       // Update log file with attempt data
@@ -1305,7 +1317,7 @@ export function createVercelRequester(params: LlmRequesterParams): LlmRequester 
       }
       messages.push({ role: "user", content: result.validationError || "Invalid response received." });
 
-      if (attempt === MAX_RETRIES) return result;
+      if (attempt === maxValidationRetries) return result;
 
       const delay = calculateRetryDelay({ attempt });
       logger.warn(`🔄 Attempt ${attempt} failed, retrying in ${Math.round(delay)}ms`);
@@ -1344,6 +1356,7 @@ export function createVercelRequester(params: LlmRequesterParams): LlmRequester 
       settings: mergedSettings,
       engine: requester.engine || defaultLlmEngine,
       _stageName: stageName,
+      maxValidationRetries,
     });
   };
 

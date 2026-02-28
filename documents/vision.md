@@ -10,7 +10,7 @@ AI Skeleton Tools (ai-skel-ts) provides robust TypeScript foundation for AI-powe
 - **Agent Ready**: Multi-step execution with tool-calling support and `toolChoice` control
 - **History Preservation**: Native return of all session messages (`newMessages`) for stateful systems
 - **Environment Config**: Provider-specific environment variables (`<PROVIDER>_API_KEY`) with URI parameter priority
-- **Enhanced Resilience**: 3-retry exponential backoff with raw response capture for self-correction
+- **Enhanced Resilience**: Configurable validation retry count (default 3, via `maxValidationRetries` URI parameter) with exponential backoff and raw response capture for self-correction
 - **Cost Transparency**: Real-time token usage and USD cost tracking
 - **Type Safety**: Zod/JSON schema validation with comprehensive error logging
 - **Deep Observability**: Step-by-step execution traces in debug logs

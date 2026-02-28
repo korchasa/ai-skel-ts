@@ -95,7 +95,7 @@ Example: `openrouter/openai/gpt-4o`, `openrouter/meta-llama/llama-3.1-8b-instruc
 - URI Parser:
   `ModelURI` class supporting `provider/model` syntax. A protocol prefix (`chat://`, `response-api://`) is accepted for backward compatibility but is ignored.
 - Warning Suppression: Global `AI_SDK_LOG_WARNINGS` control via `logVercelWarnings` URI parameter
-- Retry Logic: 3-attempt exponential backoff (1s, 2s, 4s)
+- Retry Logic: Configurable validation retry count via `maxValidationRetries` URI parameter (default 3), exponential backoff (1s, 2s, 4s). Independent from HTTP-level `maxRetries` (Vercel AI SDK).
 - Self-Correction: Retry on validation failures with error context
 - Timeout Control: Per-attempt timeout (default 30s) using AbortController. Defense-in-depth against abort/settle race condition: a `settled` flag in the timeout callback skips `abort()` if the promise already settled, and `clearTimeout` in `finally` cancels the timer. Both guards are needed because `clearTimeout` cannot cancel a callback already queued as a macrotask.
 - Parameter Support: URI defaults + per-request overrides
