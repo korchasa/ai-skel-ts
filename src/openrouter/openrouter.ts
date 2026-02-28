@@ -100,7 +100,7 @@ interface YamlLogData {
 // Constants
 // ---------------------------------------------------------------------------
 
-const MAX_RETRIES = 3;
+const DEFAULT_MAX_VALIDATION_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000;
 
 // ---------------------------------------------------------------------------
@@ -705,6 +705,12 @@ export function createOpenRouterRequester(
   const maskedUri = modelUri.toString();
   const modelName = modelUri.modelName; // e.g. "openai/gpt-4o"
 
+  // Parse maxValidationRetries from URI (controls schema validation retry count)
+  const maxValidationRetriesRaw = modelUri.params.get("maxValidationRetries");
+  const maxValidationRetries = maxValidationRetriesRaw
+    ? (Number(maxValidationRetriesRaw) >= 1 ? Number(maxValidationRetriesRaw) : DEFAULT_MAX_VALIDATION_RETRIES)
+    : DEFAULT_MAX_VALIDATION_RETRIES;
+
   // Build engine (real or injected for tests)
   const engine: OpenRouterEngine = providedEngine ?? {
     responseSend: async (request: OpenResponsesRequest & { stream?: false }): Promise<OpenResponsesNonStreamingResponse> => {
@@ -783,7 +789,7 @@ export function createOpenRouterRequester(
     let lastValidationError: string | undefined;
     let lastRawResponse: string | undefined;
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    for (let attempt = 1; attempt <= maxValidationRetries; attempt++) {
       const attemptTimestamp = new Date().toISOString();
       const attemptStart = Date.now();
 
@@ -994,7 +1000,7 @@ export function createOpenRouterRequester(
                 `[OpenRouter] [run:${ctx.runId}] [id:${identifier}:${attempt}] ⚠️ Validation failed: ${validationError}`,
               );
 
-              if (attempt < MAX_RETRIES) {
+              if (attempt < maxValidationRetries) {
                 // Self-correction: add error message for retry
                 currentMessages = [
                   ...currentMessages,
@@ -1043,7 +1049,7 @@ export function createOpenRouterRequester(
             };
             yamlLogData.attempts.push(attemptLog);
 
-            if (attempt < MAX_RETRIES) {
+            if (attempt < maxValidationRetries) {
               currentMessages = [
                 ...currentMessages,
                 { role: "assistant", content: finalText } as ModelMessage,
@@ -1127,7 +1133,7 @@ export function createOpenRouterRequester(
           `[OpenRouter] [run:${ctx.runId}] [id:${identifier}:${attempt}] ❌ Error: ${errorMsg}`,
         );
 
-        if (attempt < MAX_RETRIES) {
+        if (attempt < maxValidationRetries) {
           await sleep(INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1));
           continue;
         }

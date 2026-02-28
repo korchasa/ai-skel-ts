@@ -5,7 +5,7 @@
 ### LLM Integration (FR-LLM)
 - [x] **FR-LLM-1**: Support multiple providers via `ModelURI` class with unified syntax (`provider/model?params`); protocol prefix accepted for backward compatibility but ignored
 - [x] **FR-LLM-14**: Unified `createLlmRequester()` factory in `src/llm/factory.ts` routes by provider: `openrouter` → native `@openrouter/sdk`, others → Vercel AI SDK
-- [x] **FR-LLM-2**: Implement automatic retry with exponential backoff (max 3 attempts)
+- [x] **FR-LLM-2**: Implement automatic retry with exponential backoff (default 3 attempts, configurable via `maxValidationRetries` URI parameter)
 - [x] **FR-LLM-3**: Support self-correction on JSON parsing/Zod validation failures
 - [x] **FR-LLM-4**: Provide structured generation with schema validation and conversational output
 - [x] **FR-LLM-5**: Mask sensitive parameters (apiKey) in logging output
@@ -16,7 +16,7 @@
 - [x] **FR-LLM-10**: Support `toolChoice` parameter to control tool calling behavior
 - [x] **FR-LLM-11**: Ensure `AbortController.abort()` calls are protected from listener exceptions to prevent process crashes
 - [x] **FR-LLM-12**: Support real-time streaming via `LlmRequester.stream` (`LlmStreamer` function) returning `StreamResult<T>` with `textStream`, `fullStream`, and promise-based final values
-- [x] **FR-LLM-13**: For structured output streaming, buffer and retry internally (max 3 attempts); consumer receives only the successful attempt's stream
+- [x] **FR-LLM-13**: For structured output streaming, buffer and retry internally (default 3 attempts, configurable via `maxValidationRetries`); consumer receives only the successful attempt's stream
 
 ### Agent (FR-AGENT)
 - [x] **FR-AGENT-1**: Maintain stateful conversation history (`ModelMessage[]`)
