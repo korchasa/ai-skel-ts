@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.8.6](https://github.com/korchasa/ai-skel-ts/compare/v0.8.5...v0.8.6) (2026-02-28)
+
+
+### Features
+
+* **llm:** add YAML debug file logging for streaming requests ([814896f](https://github.com/korchasa/ai-skel-ts/commit/814896f547780fe6253ccece453397efcaa12379)), closes [#5](https://github.com/korchasa/ai-skel-ts/issues/5)
+
+
+### Bug Fixes
+
+* **llm:** prevent unhandled AbortError when timeout fires after promise settled ([2a48992](https://github.com/korchasa/ai-skel-ts/commit/2a489921ad6bb8c1b9b25f9c4f4f7712ace7180c)), closes [#6](https://github.com/korchasa/ai-skel-ts/issues/6)
+
 ### [0.8.5](https://github.com/korchasa/ai-skel-ts/compare/v0.8.4...v0.8.5) (2026-02-25)
 
 
