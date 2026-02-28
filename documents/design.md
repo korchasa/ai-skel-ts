@@ -65,6 +65,7 @@ graph TD
   - Structured output: buffered internally, validated, replayed on success (same 3-retry pattern)
   - Tool calling: `response.output_item.done` function_call events → execute → loop
   - Usage/cost from `response.completed` event
+  - YAML debug file written on completion (success/error) via `saveYamlLog` using `RunContext.saveDebugFile`
 - Structured output via Zod schema → JSON Schema → `text.format: { type: "json_schema" }` for both streaming and non-streaming
 - Tool calling with automatic execution and multi-step loop (up to `maxSteps`)
   - Tool continuation uses native OpenResponses input format (`function_call` + `function_call_output` items), not Chat Completions message conversion
@@ -141,6 +142,7 @@ Example: `openrouter/openai/gpt-4o`, `openrouter/meta-llama/llama-3.1-8b-instruc
   - **Structured** (with `schema`): buffered retry loop — stream is consumed internally, validated, and replayed on success; consumer sees only the successful attempt
 - CostTracker updated via `usage` promise resolution on every attempt (including failed validations), not only on success
 - Max 3 retry attempts for structured output (same as non-streaming path)
+- **YAML debug file logging**: Both streaming modes write a YAML debug file on completion (success or error) via `RunContext.saveDebugFile`. Uses the same `YamlLogData`/`YamlLogAttempt` structure as the non-streaming path. `_stageName` parameter determines the stage subdirectory. Structured path logs each retry attempt (validation failures, errors) before the final write. Gracefully skips if `saveDebugFile` is not available on the context.
 
 ### Agent Module (`src/agent/`)
 

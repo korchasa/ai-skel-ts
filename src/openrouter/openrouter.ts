@@ -351,9 +351,33 @@ function buildStreamResult<T>(
     logger: Logger;
     ctx: RunContext;
     costTracker: { addCost(c: number): void; addTokens(i: number, o: number): void };
+    stageName: string;
+    maskedUri: string;
+    settings: LlmSettings | undefined;
   }>
 ): StreamResult<T> {
-  const { messages, schema, tools, maxSteps, eventSource, logger, ctx, costTracker, identifier } = params;
+  const { messages, schema, tools, maxSteps, eventSource, logger, ctx, costTracker, identifier, stageName, maskedUri, settings } = params;
+
+  const startTime = Date.now();
+  const logTimestamp = new Date().toISOString();
+  const logId = `${identifier}-${Date.now()}`;
+
+  // Build YAML log data for streaming debug file
+  const streamYamlLogData: YamlLogData = {
+    id: logId,
+    timestamp: logTimestamp,
+    model: maskedUri,
+    stage: stageName,
+    settings,
+    request: {
+      model: maskedUri,
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: typeof m.content === "string" ? m.content : "[complex]",
+      })),
+    },
+    attempts: [],
+  };
 
   // Shared state resolved after stream consumption
   let resolveText!: (v: string) => void;
@@ -552,6 +576,20 @@ function buildStreamResult<T>(
       costTracker.addCost(totalCost);
       costTracker.addTokens(totalInputTokens, totalOutputTokens);
 
+      // Write YAML debug file on success
+      const duration = Date.now() - startTime;
+      streamYamlLogData.attempts.push({
+        attempt: 1,
+        timestamp: new Date().toISOString(),
+        response: { status: 200, raw: fullText, parsed: schema ? fullText : null },
+        stats: {
+          duration,
+          cost: totalCost,
+          tokens: { input: totalInputTokens, output: totalOutputTokens, total: totalInputTokens + totalOutputTokens },
+        },
+      });
+      await saveYamlLog({ ctx, stageName, logId, yamlLogData: streamYamlLogData, logger });
+
       resolveText(fullText);
       resolveToolCalls(allToolCallsAcc.length > 0 ? allToolCallsAcc : []);
       resolveToolResults(allToolResultsAcc.length > 0 ? allToolResultsAcc : []);
@@ -566,6 +604,20 @@ function buildStreamResult<T>(
       // Track accumulated cost/tokens even on error
       costTracker.addCost(totalCost);
       costTracker.addTokens(totalInputTokens, totalOutputTokens);
+
+      // Write YAML debug file on error
+      const duration = Date.now() - startTime;
+      streamYamlLogData.attempts.push({
+        attempt: 1,
+        timestamp: new Date().toISOString(),
+        error: errorMsg,
+        stats: {
+          duration,
+          cost: totalCost,
+          tokens: { input: totalInputTokens, output: totalOutputTokens, total: totalInputTokens + totalOutputTokens },
+        },
+      });
+      await saveYamlLog({ ctx, stageName, logId, yamlLogData: streamYamlLogData, logger });
 
       // Resolve all promises with safe defaults so consumers don't hang
       resolveText(fullText);
@@ -1125,6 +1177,9 @@ export function createOpenRouterRequester(
       schema,
       tools,
       maxSteps,
+      stageName: reqParams.stageName,
+      maskedUri,
+      settings,
       eventSource: () => {
         const orMessages = convertToOrMessages(messages);
         // deno-lint-ignore no-explicit-any

@@ -6,6 +6,7 @@
 import { expect } from "@std/expect";
 import { z } from "zod";
 import { jsonSchema, type ModelMessage, type Tool } from "ai";
+import { load as yamlLoad } from "js-yaml";
 
 import type { OpenResponsesStreamEvent } from "@openrouter/sdk/models";
 
@@ -1063,4 +1064,164 @@ Deno.test("createOpenRouterRequester - streaming", async (t) => {
     expect(toolResults[0].result).toBe(5);
     expect(await streamResult.text).toBe("The answer is 5");
   });
+});
+
+// ---------------------------------------------------------------------------
+// OpenRouter streaming YAML debug file logging tests
+// ---------------------------------------------------------------------------
+
+function makeCtxWithDebugCapture() {
+  const debugFileCalls: Array<{ filename: string; content: string | unknown; stageDir?: string }> = [];
+
+  const ctx = {
+    runId: "test-run-or-debug",
+    debugDir: "/tmp/test-debug-or-streaming",
+    logger: makeLogger(),
+    startTime: new Date(),
+    saveDebugFile: (params: { filename: string; content: string | unknown; stageDir?: string }) => {
+      debugFileCalls.push(params);
+      return Promise.resolve();
+    },
+  } as unknown as RunContext;
+
+  return { ctx, debugFileCalls };
+}
+
+Deno.test("OpenRouter Streaming Debug - writes YAML debug file on success", async () => {
+  const logger = makeLogger();
+  const costTracker = makeCostTracker();
+  const { ctx, debugFileCalls } = makeCtxWithDebugCapture();
+
+  const engine: OpenRouterEngine = {
+    responseSend: () => { throw new Error("should not be called"); },
+    streamSend: () => Promise.resolve(makeMockStreamEvents(["Hello", " world"], { inputTokens: 30, outputTokens: 10, cost: 0.002 })),
+  };
+
+  const requester = createOpenRouterRequester({
+    modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+    logger,
+    costTracker,
+    ctx,
+    engine,
+  });
+
+  const streamResult = requester.stream({
+    messages: [{ role: "user", content: "Hi" }],
+    identifier: "or-debug-stream",
+    schema: undefined,
+    tools: undefined,
+    maxSteps: undefined,
+    stageName: "or-stage",
+    settings: undefined,
+  });
+
+  // Consume stream
+  for await (const _ of streamResult.textStream) { /* consume */ }
+  await streamResult.text;
+  await new Promise(r => setTimeout(r, 50));
+
+  expect(debugFileCalls.length).toBe(1);
+  const call = debugFileCalls[0];
+  expect(call.filename).toContain("or-debug-stream");
+  expect(call.filename.endsWith(".yaml")).toBe(true);
+  expect(call.stageDir).toContain("or-stage");
+
+  // Parse YAML and verify structure
+  const yamlContent = typeof call.content === "string" ? call.content : String(call.content);
+  // deno-lint-ignore no-explicit-any
+  const parsed = yamlLoad(yamlContent) as any;
+  expect(parsed.id).toContain("or-debug-stream");
+  expect(parsed.model).toContain("openrouter/openai/gpt-4o");
+  expect(parsed.stage).toBe("or-stage");
+  expect(parsed.request).toBeDefined();
+  expect(parsed.request.messages).toBeDefined();
+  expect(parsed.request.messages.length).toBe(1);
+  expect(parsed.attempts.length).toBe(1);
+
+  const attempt = parsed.attempts[0];
+  expect(attempt.attempt).toBe(1);
+  expect(attempt.response).toBeDefined();
+  expect(attempt.response.raw).toBe("Hello world");
+  expect(attempt.stats).toBeDefined();
+  expect(attempt.stats.tokens.input).toBe(30);
+  expect(attempt.stats.tokens.output).toBe(10);
+  expect(attempt.stats.cost).toBe(0.002);
+});
+
+Deno.test("OpenRouter Streaming Debug - writes YAML on error", async () => {
+  const logger = makeLogger();
+  const costTracker = makeCostTracker();
+  const { ctx, debugFileCalls } = makeCtxWithDebugCapture();
+
+  const engine: OpenRouterEngine = {
+    responseSend: () => { throw new Error("should not be called"); },
+    streamSend: () => Promise.reject(new Error("API connection failed")),
+  };
+
+  const requester = createOpenRouterRequester({
+    modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+    logger,
+    costTracker,
+    ctx,
+    engine,
+  });
+
+  const streamResult = requester.stream({
+    messages: [{ role: "user", content: "Hi" }],
+    identifier: "or-debug-error",
+    schema: undefined,
+    tools: undefined,
+    maxSteps: undefined,
+    stageName: "error-stage",
+    settings: undefined,
+  });
+
+  // Consume stream — will finish with empty text due to error
+  for await (const _ of streamResult.textStream) { /* consume */ }
+  await streamResult.text;
+  await new Promise(r => setTimeout(r, 50));
+
+  expect(debugFileCalls.length).toBe(1);
+  const yamlContent = typeof debugFileCalls[0].content === "string" ? debugFileCalls[0].content : String(debugFileCalls[0].content);
+  // deno-lint-ignore no-explicit-any
+  const parsed = yamlLoad(yamlContent) as any;
+  expect(parsed.attempts.length).toBe(1);
+  expect(parsed.attempts[0].error).toBeDefined();
+  expect(parsed.attempts[0].error).toContain("API connection failed");
+});
+
+Deno.test("OpenRouter Streaming Debug - stageName is used in stageDir", async () => {
+  const logger = makeLogger();
+  const costTracker = makeCostTracker();
+  const { ctx, debugFileCalls } = makeCtxWithDebugCapture();
+
+  const engine: OpenRouterEngine = {
+    responseSend: () => { throw new Error("should not be called"); },
+    streamSend: () => Promise.resolve(makeMockStreamEvents(["ok"])),
+  };
+
+  const requester = createOpenRouterRequester({
+    modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+    logger,
+    costTracker,
+    ctx,
+    engine,
+  });
+
+  const streamResult = requester.stream({
+    messages: [{ role: "user", content: "test" }],
+    identifier: "or-debug-stage",
+    schema: undefined,
+    tools: undefined,
+    maxSteps: undefined,
+    stageName: "my-or-stage",
+    settings: undefined,
+  });
+
+  for await (const _ of streamResult.textStream) { /* consume */ }
+  await streamResult.text;
+  await new Promise(r => setTimeout(r, 50));
+
+  expect(debugFileCalls.length).toBe(1);
+  expect(debugFileCalls[0].stageDir).toContain("my-or-stage");
 });

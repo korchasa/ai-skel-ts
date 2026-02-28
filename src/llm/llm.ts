@@ -544,6 +544,34 @@ interface StructuredWorkResult<T> {
 }
 
 /**
+ * Writes a YAML debug file for a streaming request via RunContext.saveDebugFile.
+ * Silently skips if saveDebugFile is not available on the context.
+ */
+async function saveStreamYamlLog(
+  { ctx, stageName, yamlLogData, logger }: Readonly<{
+    ctx: RunContext;
+    stageName: string;
+    yamlLogData: YamlLogData;
+    logger: Logger;
+  }>
+): Promise<void> {
+  try {
+    if (ctx.saveDebugFile) {
+      const stageDir = getSubDebugDir({ ctx, stageDir: stageName.trim() || "unknown-stage" });
+      const yamlContent = createYamlLog({ logData: yamlLogData });
+      const logTimestamp = yamlLogData.timestamp.replace(/[:.]/g, "-");
+      await ctx.saveDebugFile({
+        filename: `${logTimestamp}-${yamlLogData.id}-stream-request-response.yaml`,
+        content: yamlContent,
+        stageDir,
+      });
+    }
+  } catch (err) {
+    logger.warn(`[LLM] Failed to save streaming debug log: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
  * Internal helper for streaming text generation.
  *
  * Two modes:
@@ -568,9 +596,27 @@ function tryStreamText<T>(
     _stageName: string;
   }>
 ): StreamResult<T> {
-  void _stageName; // Reserved for future YAML debug file logging in streaming path
   const startTime = Date.now();
   const timeoutMs = settings?.timeout ?? 30000;
+  const logTimestamp = new Date().toISOString();
+
+  // Build initial YAML log data for streaming debug file
+  const streamLogData: YamlLogData = {
+    id: identifier,
+    timestamp: logTimestamp,
+    model: maskedUri,
+    stage: _stageName,
+    settings: settings ?? ({} as LlmSettings),
+    request: {
+      model: maskedUri,
+      messages: messages.map(m => ({
+        role: m.role,
+        content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+      })),
+      ...(schema ? { response_format: { type: "json_object" } } : {}),
+    },
+    attempts: [],
+  };
 
   if (!schema) {
     // ── Text-only: direct streaming, no buffering ──────────────────────────────
@@ -602,7 +648,9 @@ function tryStreamText<T>(
     } as Record<string, unknown>);
 
     // Side effect: update token tracker when stream completes. Also clears timeout guard.
-    const usagePromise = (rawResult.usage as Promise<{ inputTokens?: number; outputTokens?: number; totalTokens?: number }>).then(usage => {
+    // We also capture text for the debug log.
+    const textForLog = rawResult.text as Promise<string>;
+    const usagePromise = (rawResult.usage as Promise<{ inputTokens?: number; outputTokens?: number; totalTokens?: number }>).then(async (usage) => {
       settled = true;
       clearTimeout(timeoutId);
       const inputTokens = usage.inputTokens ?? 0;
@@ -612,10 +660,43 @@ function tryStreamText<T>(
       logger.info(
         `[LLM] [run:${ctx.runId}] [id:${identifier}] ✅ Stream complete: duration=${duration}ms, tokens=${inputTokens + outputTokens}`
       );
+
+      // Write YAML debug file on success
+      const resolvedText = await textForLog.catch(() => "");
+      const logAttempt: YamlLogAttempt = {
+        attempt: 1,
+        timestamp: new Date().toISOString(),
+        response: { status: 200, raw: resolvedText, parsed: null },
+        stats: {
+          duration,
+          cost: 0,
+          tokens: { input: inputTokens, output: outputTokens, total: inputTokens + outputTokens },
+        },
+      };
+      (streamLogData.attempts as YamlLogAttempt[]).push(logAttempt);
+      await saveStreamYamlLog({ ctx, stageName: _stageName, yamlLogData: streamLogData, logger });
+
       return { inputTokens, outputTokens };
-    }).catch((err) => {
+    }).catch(async (err) => {
       settled = true;
       clearTimeout(timeoutId);
+
+      // Write YAML debug file on error
+      const duration = Date.now() - startTime;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      const logAttempt: YamlLogAttempt = {
+        attempt: 1,
+        timestamp: new Date().toISOString(),
+        error: errorMsg,
+        stats: {
+          duration,
+          cost: 0,
+          tokens: { input: 0, output: 0, total: 0 },
+        },
+      };
+      (streamLogData.attempts as YamlLogAttempt[]).push(logAttempt);
+      await saveStreamYamlLog({ ctx, stageName: _stageName, yamlLogData: streamLogData, logger });
+
       throw err;
     });
 
@@ -676,6 +757,7 @@ function tryStreamText<T>(
     const allMessages = [...messages];
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const attemptStart = Date.now();
       const controller = new AbortController();
       // Guard flag: prevents abort() after the stream settles. See issue #6.
       let attemptSettled = false;
@@ -732,8 +814,19 @@ function tryStreamText<T>(
           // Usage promise rejected — no token data available for this failed attempt
         }
 
+        // Log failed attempt for YAML debug
+        const attemptDuration = Date.now() - attemptStart;
+        (streamLogData.attempts as YamlLogAttempt[]).push({
+          attempt,
+          timestamp: new Date().toISOString(),
+          error: msg,
+          stats: { duration: attemptDuration, cost: 0, tokens: { input: 0, output: 0, total: 0 } },
+        });
+
         logger.debug(`[LLM] [run:${ctx.runId}] [id:${identifier}:${attempt}] Stream error: ${msg}`);
         if (attempt >= MAX_RETRIES) {
+          // Write YAML debug file before throwing
+          await saveStreamYamlLog({ ctx, stageName: _stageName, yamlLogData: streamLogData, logger });
           throw new Error(`Streaming structured output failed after ${MAX_RETRIES} attempts: ${msg}`);
         }
         allMessages.push({ role: "assistant", content: text || "" });
@@ -762,6 +855,20 @@ function tryStreamText<T>(
           `[LLM] [run:${ctx.runId}] [id:${identifier}] ✅ Stream (structured) complete: attempt=${attempt}, duration=${duration}ms, cost=$${cost.toFixed(6)}, tokens=${inputTokens + outputTokens}`
         );
 
+        // Log successful attempt for YAML debug
+        const attemptDuration = Date.now() - attemptStart;
+        (streamLogData.attempts as YamlLogAttempt[]).push({
+          attempt,
+          timestamp: new Date().toISOString(),
+          response: { status: 200, raw: text, parsed: output },
+          stats: {
+            duration: attemptDuration,
+            cost,
+            tokens: { input: inputTokens, output: outputTokens, total: inputTokens + outputTokens },
+          },
+        });
+        await saveStreamYamlLog({ ctx, stageName: _stageName, yamlLogData: streamLogData, logger });
+
         // deno-lint-ignore no-explicit-any
         const steps: any[] = rawResult.steps ? await Promise.resolve(rawResult.steps) : [];
         // deno-lint-ignore no-explicit-any
@@ -781,15 +888,18 @@ function tryStreamText<T>(
       }
 
       // Validation failed — track cost/tokens from this attempt before retrying
+      let failedInputTokens = 0;
+      let failedOutputTokens = 0;
+      let failedCost = 0;
       try {
         const failedUsage = await (rawResult.usage as Promise<{ inputTokens?: number; outputTokens?: number }>);
-        const failedInputTokens = failedUsage.inputTokens ?? 0;
-        const failedOutputTokens = failedUsage.outputTokens ?? 0;
+        failedInputTokens = failedUsage.inputTokens ?? 0;
+        failedOutputTokens = failedUsage.outputTokens ?? 0;
 
         // deno-lint-ignore no-explicit-any
         const failedProviderMetadata = await (((rawResult as any).providerMetadata as Promise<Record<string, Record<string, unknown>> | undefined> | undefined)?.catch(() => undefined) ?? Promise.resolve(undefined));
         const failedOrUsage = failedProviderMetadata?.openrouter?.usage as { cost?: number } | undefined;
-        const failedCost = failedOrUsage?.cost ?? (failedProviderMetadata?.openrouter?.cost as number) ?? 0;
+        failedCost = failedOrUsage?.cost ?? (failedProviderMetadata?.openrouter?.cost as number) ?? 0;
 
         if (failedInputTokens > 0 || failedOutputTokens > 0 || failedCost > 0) {
           costTracker.addCost(failedCost);
@@ -804,6 +914,19 @@ function tryStreamText<T>(
         );
       }
 
+      // Log failed validation attempt for YAML debug
+      const attemptDuration = Date.now() - attemptStart;
+      (streamLogData.attempts as YamlLogAttempt[]).push({
+        attempt,
+        timestamp: new Date().toISOString(),
+        response: { status: 200, raw: text, parsed: null, error: validationErrorMsg },
+        stats: {
+          duration: attemptDuration,
+          cost: failedCost,
+          tokens: { input: failedInputTokens, output: failedOutputTokens, total: failedInputTokens + failedOutputTokens },
+        },
+      });
+
       allMessages.push({ role: "assistant", content: text || "" });
       allMessages.push({ role: "user", content: validationErrorMsg });
 
@@ -813,6 +936,8 @@ function tryStreamText<T>(
       }
     }
 
+    // Write YAML debug file before throwing (all attempts exhausted)
+    await saveStreamYamlLog({ ctx, stageName: _stageName, yamlLogData: streamLogData, logger });
     throw new Error(`Streaming structured output failed: validation did not pass after ${MAX_RETRIES} attempts`);
   })();
 
