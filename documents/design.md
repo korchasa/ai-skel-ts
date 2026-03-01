@@ -53,7 +53,7 @@ graph TD
 - `convertToOrMessages()`: Converts Vercel AI SDK `ModelMessage[]` → OpenRouter `Message[]` (supports v6 `input`/`output` and legacy v5 `args`/`result` formats)
 - `convertToOrTools()`: Converts Vercel AI SDK `Record<string, Tool>` → OpenRouter `ToolDefinitionJson[]` (Chat Completions format, kept for backward compat)
 - `convertToOrRequestTools()`: Converts tools to OpenResponses API flat format (`{ type, name, parameters }`)
-- `OpenRouterEngine`: Interface for HTTP transport (enables mocking in tests); `responseSend` for non-streaming, `streamSend` for streaming
+- `OpenRouterEngine`: Interface for HTTP transport (enables mocking in tests); `responseSend` for non-streaming, `streamSend` for streaming — both accept optional `AbortSignal` for timeout control
 
 **Features**:
 
@@ -69,6 +69,7 @@ graph TD
 - Structured output via Zod schema → JSON Schema → `text.format: { type: "json_schema" }` for both streaming and non-streaming
 - Tool calling with automatic execution and multi-step loop (up to `maxSteps`)
   - Tool continuation uses native OpenResponses input format (`function_call` + `function_call_output` items), not Chat Completions message conversion
+- Timeout control: per-request timeout (default 30s, configurable via `settings.timeout`) using `AbortController` with settled-flag defense-in-depth pattern (mirrors `llm.ts`). Applied to both `responseSend` (per step call) and `streamSend` (entire stream lifecycle). Signal forwarded to `@openrouter/sdk` via `RequestOptions.signal`.
 - Retry logic (3 attempts) with self-correction on JSON parse / Zod validation failures
 - CostTracker, Logger, RunContext integration (cost extracted from `usage.cost` in API response)
 - Backward compatible with messages from `createVercelRequester`

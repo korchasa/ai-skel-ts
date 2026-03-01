@@ -17,6 +17,7 @@
 - [x] **FR-LLM-11**: Ensure `AbortController.abort()` calls are protected from listener exceptions to prevent process crashes
 - [x] **FR-LLM-12**: Support real-time streaming via `LlmRequester.stream` (`LlmStreamer` function) returning `StreamResult<T>` with `textStream`, `fullStream`, and promise-based final values
 - [x] **FR-LLM-13**: For structured output streaming, buffer and retry internally (default 3 attempts, configurable via `maxValidationRetries`); consumer receives only the successful attempt's stream
+- [x] **FR-LLM-15**: OpenRouter native module supports per-request timeout (default 30s, configurable via `settings.timeout`) using `AbortController` with settled-flag pattern for both non-streaming and streaming paths
 
 ### Agent (FR-AGENT)
 - [x] **FR-AGENT-1**: Maintain stateful conversation history (`ModelMessage[]`)
