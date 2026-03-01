@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.8.8](https://github.com/korchasa/ai-skel-ts/compare/v0.8.7...v0.8.8) (2026-03-01)
+
+
+### Features
+
+* **openrouter:** add timeout support to OpenRouter requester ([3b0a40a](https://github.com/korchasa/ai-skel-ts/commit/3b0a40ae3fe39539881439e97cb252f0131a014e)), closes [#9](https://github.com/korchasa/ai-skel-ts/issues/9)
+
 ### [0.8.7](https://github.com/korchasa/ai-skel-ts/compare/v0.8.6...v0.8.7) (2026-02-28)
 
 
