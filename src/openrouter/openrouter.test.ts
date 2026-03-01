@@ -1225,3 +1225,210 @@ Deno.test("OpenRouter Streaming Debug - stageName is used in stageDir", async ()
   expect(debugFileCalls.length).toBe(1);
   expect(debugFileCalls[0].stageDir).toContain("my-or-stage");
 });
+
+// ---------------------------------------------------------------------------
+// Timeout support
+// ---------------------------------------------------------------------------
+
+Deno.test("createOpenRouterRequester - timeout", async (t) => {
+  const logger = makeLogger();
+  const costTracker = makeCostTracker();
+  const ctx = makeCtx();
+
+  await t.step("non-streaming: aborts request after settings.timeout ms", async () => {
+    const engine: OpenRouterEngine = {
+      responseSend: (_req, signal) => {
+        // Simulate a request that hangs until aborted
+        return new Promise((_resolve, reject) => {
+          const onAbort = () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          };
+          if (signal?.aborted) {
+            onAbort();
+            return;
+          }
+          signal?.addEventListener("abort", onAbort);
+        });
+      },
+    };
+
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test&maxValidationRetries=1"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+
+    const start = Date.now();
+    try {
+      await requester({
+        messages: [{ role: "user", content: "Hi" }],
+        identifier: "timeout-test-1",
+        schema: undefined,
+        tools: undefined,
+        maxSteps: undefined,
+        stageName: "test",
+        settings: { timeout: 200 },
+      });
+      throw new Error("Expected request to be aborted");
+    } catch (err) {
+      const elapsed = Date.now() - start;
+      expect(err).toBeInstanceOf(DOMException);
+      expect((err as DOMException).name).toBe("AbortError");
+      // Should abort close to 200ms; allow tolerance for CI
+      expect(elapsed).toBeGreaterThanOrEqual(150);
+      expect(elapsed).toBeLessThan(2000);
+    }
+  });
+
+  await t.step("non-streaming: passes signal to responseSend (default 30s timeout)", async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const engine: OpenRouterEngine = {
+      responseSend: (_req, signal) => {
+        receivedSignal = signal;
+        return Promise.resolve(makeResponse("fast response"));
+      },
+    };
+
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+
+    await requester({
+      messages: [{ role: "user", content: "Hi" }],
+      identifier: "timeout-test-default",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: undefined,
+    });
+
+    // Signal should have been passed (not aborted since response was fast)
+    expect(receivedSignal).toBeDefined();
+    expect(receivedSignal!.aborted).toBe(false);
+  });
+
+  await t.step("non-streaming: signal not aborted when response completes before timeout", async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const engine: OpenRouterEngine = {
+      responseSend: (_req, signal) => {
+        receivedSignal = signal;
+        return Promise.resolve(makeResponse("fast"));
+      },
+    };
+
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+
+    const result = await requester({
+      messages: [{ role: "user", content: "Hi" }],
+      identifier: "timeout-test-no-abort",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: { timeout: 5000 },
+    });
+
+    expect(result.text).toBe("fast");
+    expect(receivedSignal).toBeDefined();
+    expect(receivedSignal!.aborted).toBe(false);
+  });
+
+  await t.step("streaming: aborts stream after settings.timeout ms", async () => {
+    const engine: OpenRouterEngine = {
+      responseSend: () => { throw new Error("should not be called"); },
+      streamSend: (_req, signal) => {
+        // Return a promise that hangs until aborted
+        return new Promise((_resolve, reject) => {
+          const onAbort = () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          };
+          if (signal?.aborted) {
+            onAbort();
+            return;
+          }
+          signal?.addEventListener("abort", onAbort);
+        });
+      },
+    };
+
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+
+    const streamResult = requester.stream({
+      messages: [{ role: "user", content: "Hi" }],
+      identifier: "timeout-stream-1",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: { timeout: 200 },
+    });
+
+    // The stream should error due to timeout; textStream finishes with empty/partial data
+    const start = Date.now();
+    const chunks: string[] = [];
+    for await (const chunk of streamResult.textStream) {
+      chunks.push(chunk);
+    }
+
+    // Wait for the text promise to settle
+    await streamResult.text;
+
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeGreaterThanOrEqual(150);
+    expect(elapsed).toBeLessThan(2000);
+  });
+
+  await t.step("streaming: passes signal to streamSend", async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const engine: OpenRouterEngine = {
+      responseSend: () => { throw new Error("should not be called"); },
+      streamSend: (_req, signal) => {
+        receivedSignal = signal;
+        return Promise.resolve(makeMockStreamEvents(["ok"]));
+      },
+    };
+
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+
+    const streamResult = requester.stream({
+      messages: [{ role: "user", content: "Hi" }],
+      identifier: "timeout-stream-signal",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: { timeout: 5000 },
+    });
+
+    for await (const _ of streamResult.textStream) { /* consume */ }
+    await streamResult.text;
+
+    expect(receivedSignal).toBeDefined();
+    expect(receivedSignal!.aborted).toBe(false);
+  });
+});

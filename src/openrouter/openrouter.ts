@@ -53,10 +53,10 @@ export interface OpenRouterEngine {
   /** @deprecated Use `responseSend` instead. Kept for backward compatibility. */
   chatSend?(params: ChatGenerationParams): Promise<ChatResponse>;
   /** Non-streaming request via OpenResponses API. Returns response with usage (including cost). */
-  responseSend?(request: OpenResponsesRequest & { stream?: false }): Promise<OpenResponsesNonStreamingResponse>;
+  responseSend?(request: OpenResponsesRequest & { stream?: false }, signal?: AbortSignal): Promise<OpenResponsesNonStreamingResponse>;
   /** Returns an async iterable of OpenResponses SSE events. Typed as `unknown` to allow easy mocking. */
   // deno-lint-ignore no-explicit-any
-  streamSend?: (request: OpenResponsesRequest & { stream: true }) => Promise<AsyncIterable<any>>;
+  streamSend?: (request: OpenResponsesRequest & { stream: true }, signal?: AbortSignal) => Promise<AsyncIterable<any>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -347,7 +347,7 @@ function buildStreamResult<T>(
     tools: Record<string, Tool> | undefined;
     maxSteps: number | undefined;
     // deno-lint-ignore no-explicit-any
-    eventSource: () => Promise<AsyncIterable<any>>;
+    eventSource: (signal?: AbortSignal) => Promise<AsyncIterable<any>>;
     logger: Logger;
     ctx: RunContext;
     costTracker: { addCost(c: number): void; addTokens(i: number, o: number): void };
@@ -448,9 +448,27 @@ function buildStreamResult<T>(
 
     const maxStepsUsed = maxSteps ?? (tools ? 5 : 1);
 
+    // AbortController + settled-flag pattern for timeout (mirrors llm.ts).
+    // A single timeout covers the entire stream from start to finish.
+    const timeoutMs = settings?.timeout ?? 30000;
+    const controller = new AbortController();
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      try {
+        controller.abort();
+      } catch (error) {
+        logger.warn(`[OpenRouter] Error during stream controller.abort(): ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }, timeoutMs);
+
+    logger.debug(
+      `[OpenRouter] [run:${ctx.runId}] [id:${identifier}] 🚀 Stream request: model=${maskedUri}, timeout=${timeoutMs}ms`,
+    );
+
     try {
       for (let step = 0; step < maxStepsUsed; step++) {
-        const eventIterable = await eventSource();
+        const eventIterable = await eventSource(controller.signal);
 
         // Collect SSE events for this step
         let stepText = "";
@@ -629,6 +647,8 @@ function buildStreamResult<T>(
       resolveUsage({ inputTokens: totalInputTokens, outputTokens: totalOutputTokens });
       resolveCost(totalCost);
     } finally {
+      settled = true;
+      clearTimeout(timeoutId);
       finishChunks();
     }
   })();
@@ -713,24 +733,30 @@ export function createOpenRouterRequester(
 
   // Build engine (real or injected for tests)
   const engine: OpenRouterEngine = providedEngine ?? {
-    responseSend: async (request: OpenResponsesRequest & { stream?: false }): Promise<OpenResponsesNonStreamingResponse> => {
+    responseSend: async (request: OpenResponsesRequest & { stream?: false }, signal?: AbortSignal): Promise<OpenResponsesNonStreamingResponse> => {
       const client = new OpenRouter({
         apiKey,
         ...(baseURL ? { serverURL: baseURL } : {}),
       });
       // The Deno-cached version expects { openResponsesRequest: ... } wrapper
       // deno-lint-ignore no-explicit-any
-      const response = await (client.beta.responses as any).send({ openResponsesRequest: { ...request, stream: false } });
+      const response = await (client.beta.responses as any).send(
+        { openResponsesRequest: { ...request, stream: false } },
+        signal ? { signal } : undefined,
+      );
       return response as OpenResponsesNonStreamingResponse;
     },
-    streamSend: async (request: OpenResponsesRequest & { stream: true }): Promise<AsyncIterable<OpenResponsesStreamEvent>> => {
+    streamSend: async (request: OpenResponsesRequest & { stream: true }, signal?: AbortSignal): Promise<AsyncIterable<OpenResponsesStreamEvent>> => {
       const client = new OpenRouter({
         apiKey,
         ...(baseURL ? { serverURL: baseURL } : {}),
       });
       // The Deno-cached version of betaResponsesSend.js expects { openResponsesRequest: ... } wrapper
       // deno-lint-ignore no-explicit-any
-      const eventStream = await (client.beta.responses as any).send({ openResponsesRequest: request });
+      const eventStream = await (client.beta.responses as any).send(
+        { openResponsesRequest: request },
+        signal ? { signal } : undefined,
+      );
       return eventStream as AsyncIterable<OpenResponsesStreamEvent>;
     },
   };
@@ -793,8 +819,9 @@ export function createOpenRouterRequester(
       const attemptTimestamp = new Date().toISOString();
       const attemptStart = Date.now();
 
+      const timeoutMs = settings?.timeout ?? 30000;
       logger.debug(
-        `[OpenRouter] [run:${ctx.runId}] [id:${identifier}:${attempt}] 🚀 Request: model=${maskedUri}, attempt=${attempt}`,
+        `[OpenRouter] [run:${ctx.runId}] [id:${identifier}:${attempt}] 🚀 Request: model=${maskedUri}, timeout=${timeoutMs}ms, attempt=${attempt}`,
       );
 
       try {
@@ -845,7 +872,26 @@ export function createOpenRouterRequester(
             ...(settings?.presencePenalty !== undefined ? { presencePenalty: settings.presencePenalty } : {}),
           };
 
-          const response = await responseSendFn(request);
+          // AbortController + settled-flag pattern for timeout (mirrors llm.ts).
+          // See GitHub issue #6 for rationale on the 3-layer defense.
+          const controller = new AbortController();
+          let settled = false;
+          const timeoutId = setTimeout(() => {
+            if (settled) return;
+            try {
+              controller.abort();
+            } catch (error) {
+              logger.warn(`[OpenRouter] Error during controller.abort(): ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }, timeoutMs);
+
+          let response: OpenResponsesNonStreamingResponse;
+          try {
+            response = await responseSendFn(request, controller.signal);
+          } finally {
+            settled = true;
+            clearTimeout(timeoutId);
+          }
           lastResponse = response;
 
           // Accumulate token usage and cost from OpenResponses API
@@ -1186,7 +1232,7 @@ export function createOpenRouterRequester(
       stageName: reqParams.stageName,
       maskedUri,
       settings,
-      eventSource: () => {
+      eventSource: (signal?: AbortSignal) => {
         const orMessages = convertToOrMessages(messages);
         // deno-lint-ignore no-explicit-any
         const orInput = fromChatMessages(orMessages as any);
@@ -1219,7 +1265,7 @@ export function createOpenRouterRequester(
         if (!engine.streamSend) {
           return Promise.reject(new Error("[OpenRouter] streamSend is not implemented in this engine. Use a real engine or provide a mock with streamSend."));
         }
-        return engine.streamSend(request);
+        return engine.streamSend(request, signal);
       },
       logger,
       ctx,
