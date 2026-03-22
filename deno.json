@@ -43,6 +43,14 @@
     "@std/testing": "jsr:@std/testing@^1.0.9",
     "dotenv": "npm:dotenv@^17.2.3"
   },
+  "agents": {
+    "skills": [
+      {
+        "name": "ai-skel-ts-usage",
+        "path": "./skills/ai-skel-ts-usage"
+      }
+    ]
+  },
   "publish": {
     "exclude": [
       ".github",
@@ -53,7 +61,12 @@
       "src/fetchers/local-fetcher/fixtures"
     ]
   },
-  "lint": {},
+  "fmt": {
+    "exclude": ["**/*.md", ".cursor/", ".claude/"]
+  },
+  "lint": {
+    "exclude": [".claude/"]
+  },
   "tasks": {
     "check": "deno lint && deno test -A",
     "test": "deno test -A",
