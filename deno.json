@@ -1,6 +1,6 @@
 {
   "name": "@korchasa/ai-skel-ts",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "license": "MIT",
   "exports": {
     ".": "./mod.ts",
@@ -62,10 +62,16 @@
     ]
   },
   "fmt": {
-    "exclude": ["**/*.md", ".cursor/", ".claude/"]
+    "exclude": [
+      "**/*.md",
+      ".cursor/",
+      ".claude/"
+    ]
   },
   "lint": {
-    "exclude": [".claude/"]
+    "exclude": [
+      ".claude/"
+    ]
   },
   "tasks": {
     "check": "deno lint && deno test -A",
