@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.8.10](https://github.com/korchasa/ai-skel-ts/compare/v0.8.9...v0.8.10) (2026-05-29)
+
+
+### Features
+
+* **llm:** add reasoning-effort config for OpenRouter requester ([0312850](https://github.com/korchasa/ai-skel-ts/commit/031285037d0b23f7a9b5ef3fe99f74e5f1ff7e05))
+
 ### [0.8.9](https://github.com/korchasa/ai-skel-ts/compare/v0.8.8...v0.8.9) (2026-04-07)
 
 
