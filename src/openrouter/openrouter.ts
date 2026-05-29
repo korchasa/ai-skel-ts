@@ -870,6 +870,7 @@ export function createOpenRouterRequester(
             ...(settings?.topP !== undefined ? { topP: settings.topP } : {}),
             ...(settings?.frequencyPenalty !== undefined ? { frequencyPenalty: settings.frequencyPenalty } : {}),
             ...(settings?.presencePenalty !== undefined ? { presencePenalty: settings.presencePenalty } : {}),
+            ...(settings?.reasoning !== undefined ? { reasoning: settings.reasoning } : {}),
           };
 
           // AbortController + settled-flag pattern for timeout (mirrors llm.ts).
@@ -1260,6 +1261,7 @@ export function createOpenRouterRequester(
           ...(settings?.topP !== undefined ? { topP: settings.topP } : {}),
           ...(settings?.frequencyPenalty !== undefined ? { frequencyPenalty: settings.frequencyPenalty } : {}),
           ...(settings?.presencePenalty !== undefined ? { presencePenalty: settings.presencePenalty } : {}),
+          ...(settings?.reasoning !== undefined ? { reasoning: settings.reasoning } : {}),
         };
 
         if (!engine.streamSend) {

@@ -142,6 +142,21 @@ export type LlmStreamer = <T>(
 ) => StreamResult<T>;
 
 /**
+ * Reasoning-effort controls for models with a thinking phase (e.g. DeepSeek,
+ * Gemini, Grok). Lowering the effort cuts the number of reasoning tokens the
+ * model emits, which directly reduces latency and cost on token-bound
+ * inference. Maps onto OpenRouter's Responses-API `reasoning` parameter.
+ */
+export interface LlmReasoningConfig {
+  /** Effort level; lower = fewer thinking tokens = faster/cheaper. */
+  effort?: 'xhigh' | 'high' | 'medium' | 'low' | 'minimal' | 'none';
+  /** Hard cap on reasoning tokens (alternative to `effort`). */
+  maxTokens?: number;
+  /** Explicitly enable/disable the reasoning phase. */
+  enabled?: boolean;
+}
+
+/**
  * Supported LLM generation settings.
  */
 export type LlmSettings = CallSettings & {
@@ -150,6 +165,8 @@ export type LlmSettings = CallSettings & {
     type: 'tool';
     toolName: string;
   };
+  /** Reasoning-effort controls (OpenRouter provider; ignored by others). */
+  reasoning?: LlmReasoningConfig;
 };
 
 /**

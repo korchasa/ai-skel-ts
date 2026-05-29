@@ -477,6 +477,62 @@ Deno.test("createOpenRouterRequester - text generation", async (t) => {
     expect(req.maxOutputTokens).toBe(200);
   });
 
+  await t.step("passes reasoning config to request", async () => {
+    const capturedRequests: unknown[] = [];
+    const engine: OpenRouterEngine = {
+      responseSend: (req) => {
+        capturedRequests.push(req);
+        return Promise.resolve(makeResponse("ok"));
+      },
+    };
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/deepseek/deepseek-v4-flash?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+    await requester({
+      messages: [{ role: "user", content: "Hi" }],
+      identifier: "test-reasoning",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: { reasoning: { effort: "low" } },
+    });
+    const req = capturedRequests[0] as Record<string, unknown>;
+    expect(req.reasoning).toEqual({ effort: "low" });
+  });
+
+  await t.step("omits reasoning when not provided", async () => {
+    const capturedRequests: unknown[] = [];
+    const engine: OpenRouterEngine = {
+      responseSend: (req) => {
+        capturedRequests.push(req);
+        return Promise.resolve(makeResponse("ok"));
+      },
+    };
+    const requester = createOpenRouterRequester({
+      modelUri: ModelURI.parse("chat://openrouter/openai/gpt-4o?apiKey=test"),
+      logger,
+      costTracker,
+      ctx,
+      engine,
+    });
+    await requester({
+      messages: [{ role: "user", content: "Hi" }],
+      identifier: "test-no-reasoning",
+      schema: undefined,
+      tools: undefined,
+      maxSteps: undefined,
+      stageName: "test",
+      settings: { temperature: 0.5 },
+    });
+    const req = capturedRequests[0] as Record<string, unknown>;
+    expect("reasoning" in req).toBe(false);
+  });
+
   await t.step("extracts estimatedCost from usage.cost field", async () => {
     const engine: OpenRouterEngine = {
       responseSend: () =>
